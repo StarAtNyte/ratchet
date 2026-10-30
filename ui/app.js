@@ -1,6 +1,10 @@
 const $ = (s) => document.querySelector(s);
 const token = new URLSearchParams(location.search).get('t') ?? '';
-const COLORS = { claude: '#f2956b', codex: '#4fd1c5', antigravity: '#a592f7', lead: '#e8edf7', bad: '#ef6b73', none: '#5f6f93', ok: '#6ad39b', warn: '#f0b45a', accent: '#f0b45a' };
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const COLORS = {};
+const loadColors = () => Object.assign(COLORS, { claude: css('--harness-claude'), codex: css('--harness-codex'), antigravity: css('--harness-antigravity'), lead: css('--color-ink'), bad: css('--color-bad'), none: css('--harness-other'), ok: css('--color-ok'), warn: css('--color-accent'), accent: css('--color-accent'), paper: css('--color-paper-3'), panel: css('--color-paper-2'), rule: css('--color-rule'), muted: css('--color-muted'), ink2: css('--color-ink-2') });
+loadColors();
+const tint = (c, pct) => `color-mix(in oklab, ${c} ${pct}%, transparent)`;
 
 const S = {
   settings: { dir: '', mode: 'auto', slots: 2 },
@@ -252,10 +256,10 @@ function frame(t) {
   const r = cur();
   const cx = W / 2; const cy = H / 2 + 6; const m = Math.min(W, H);
   // instrument-dial backdrop: hairline rings, degree ticks, and a slowly turning ratchet wheel
-  ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(150,164,194,.12)';
+  ctx.lineWidth = 1; ctx.strokeStyle = tint(COLORS.muted, 14);
   [0.13, 0.27, 0.4].forEach((k) => { ctx.beginPath(); ctx.arc(cx, cy, m * k, 0, 7); ctx.stroke(); });
   for (let i = 0; i < 72; i++) { const an = (i / 72) * Math.PI * 2; const r0 = m * 0.4; const r1 = r0 + (i % 6 === 0 ? 9 : 4); ctx.beginPath(); ctx.moveTo(cx + Math.cos(an) * r0, cy + Math.sin(an) * r0); ctx.lineTo(cx + Math.cos(an) * r1, cy + Math.sin(an) * r1); ctx.stroke(); }
-  ctx.strokeStyle = 'rgba(240,180,90,.16)'; ctx.beginPath();
+  ctx.strokeStyle = tint(COLORS.accent, 20); ctx.beginPath();
   const teeth = 28; const rot = t / 60000;
   for (let i = 0; i < teeth; i++) {
     const a0 = rot + (i / teeth) * Math.PI * 2; const a1 = a0 + (0.8 / teeth) * Math.PI * 2; const a2 = a0 + (1 / teeth) * Math.PI * 2;
@@ -271,10 +275,10 @@ function frame(t) {
     const vals = sc.map((a) => a.score); const asc = vals[vals.length - 1] >= vals[0];
     let best = vals[0]; const curve = vals.map((v) => (best = asc ? Math.max(best, v) : Math.min(best, v)));
     const lo = Math.min(...vals); const hi = Math.max(...vals); const bx = W - 190; const by = H - 70; const bw = 170; const bh = 48;
-    ctx.fillStyle = 'rgba(10,15,29,.7)'; ctx.strokeStyle = '#263558'; ctx.beginPath(); ctx.roundRect(bx - 10, by - 22, bw + 20, bh + 34, 8); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#96a4c2'; ctx.font = 'italic 11px Georgia, serif'; ctx.textAlign = 'left'; ctx.fillText(`best ${curve[curve.length - 1].toFixed(3)} · ${sc.length} tries`, bx, by - 8);
+    ctx.fillStyle = COLORS.paper; ctx.strokeStyle = COLORS.rule; ctx.beginPath(); ctx.roundRect(bx - 10, by - 22, bw + 20, bh + 34, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = COLORS.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`best ${curve[curve.length - 1].toFixed(3)} · ${sc.length} tries`, bx, by - 8);
     const X = (i) => bx + (i / (curve.length - 1)) * bw; const Y = (v) => by + bh - ((v - lo) / (hi - lo || 1)) * bh;
-    ctx.strokeStyle = 'rgba(150,164,194,.35)'; ctx.lineWidth = 1; ctx.beginPath(); vals.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
+    ctx.strokeStyle = tint(COLORS.muted, 40); ctx.lineWidth = 1; ctx.beginPath(); vals.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
     ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.8; ctx.beginPath(); curve.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
   }
   const tg = targets(r);
@@ -294,7 +298,7 @@ function frame(t) {
     const n = N(a.id); const p = N(a.parent ?? 'lead'); if (!n || !p) continue;
     const col = COLORS[harnessOf(a)] ?? COLORS.none;
     const mx = (n.x + p.x) / 2 + (n.y - p.y) * 0.12; const my = (n.y + p.y) / 2 - (n.x - p.x) * 0.12;
-    ctx.strokeStyle = a.status === 'failed' ? 'rgba(255,77,94,.35)' : a.status === 'done' ? col + '55' : col + '33';
+    ctx.strokeStyle = a.status === 'failed' ? tint(COLORS.bad, 40) : a.status === 'done' ? tint(col, 35) : tint(col, 20);
     ctx.lineWidth = a.status === 'running' ? 1.6 : 1;
     ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.quadraticCurveTo(mx, my, n.x, n.y); ctx.stroke();
     if (a.status === 'running') { ctx.setLineDash([4, 6]); ctx.lineDashOffset = -t / 40; ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.quadraticCurveTo(mx, my, n.x, n.y); ctx.stroke(); ctx.setLineDash([]); }
@@ -313,24 +317,24 @@ function frame(t) {
       ctx.strokeStyle = col; ctx.globalAlpha = (1 - k) * 0.5; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(n.x, n.y, rad + k * 12, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
     }
     if (a.status === 'queued') { ctx.setLineDash([3, 4]); }
-        ctx.fillStyle = a.status === 'done' ? col : '#0a0f1d'; ctx.strokeStyle = col; ctx.lineWidth = 2;
+        ctx.fillStyle = a.status === 'done' ? col : COLORS.paper; ctx.strokeStyle = col; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(n.x, n.y, rad, 0, 7); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
-    if (a.status === 'done') { ctx.strokeStyle = '#0a0f1d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(n.x - rad * 0.4, n.y); ctx.lineTo(n.x - rad * 0.1, n.y + rad * 0.35); ctx.lineTo(n.x + rad * 0.45, n.y - rad * 0.3); ctx.stroke(); }
+    if (a.status === 'done') { ctx.strokeStyle = COLORS.paper; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(n.x - rad * 0.4, n.y); ctx.lineTo(n.x - rad * 0.1, n.y + rad * 0.35); ctx.lineTo(n.x + rad * 0.45, n.y - rad * 0.3); ctx.stroke(); }
     if (a.status === 'failed') { ctx.strokeStyle = COLORS.bad; ctx.beginPath(); ctx.moveTo(n.x - 4, n.y - 4); ctx.lineTo(n.x + 4, n.y + 4); ctx.moveTo(n.x + 4, n.y - 4); ctx.lineTo(n.x - 4, n.y + 4); ctx.stroke(); }
     const fl = Date.now() - (a.flash ?? 0); if (a.flash && fl < 600) { ctx.strokeStyle = COLORS.warn; ctx.globalAlpha = 1 - fl / 600; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(n.x, n.y, rad + 8 + fl / 40, 0, 7); ctx.stroke(); ctx.globalAlpha = 1; }
-    ctx.fillStyle = S.focus === a.id ? '#fff' : '#96a4c2'; ctx.font = 'italic 12px Georgia, serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = S.focus === a.id ? COLORS.lead : COLORS.muted; ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(a.id === 'lead' ? 'LEAD' : a.id, n.x, n.y + rad + 13);
-    if (a.score != null && Number.isFinite(a.score)) { ctx.fillStyle = a.champion ? COLORS.warn : '#7e87a8'; ctx.font = '10px ui-sans-serif, system-ui, sans-serif'; ctx.fillText(Number(a.score).toFixed(3), n.x, n.y + rad + 35); }
+    if (a.score != null && Number.isFinite(a.score)) { ctx.fillStyle = a.champion ? COLORS.accent : COLORS.muted; ctx.font = '10px ui-sans-serif, system-ui, sans-serif'; ctx.fillText(Number(a.score).toFixed(3), n.x, n.y + rad + 35); }
     if (a.champion) { ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(n.x, n.y, rad + 5, 0, 7); ctx.stroke(); ctx.fillStyle = COLORS.accent; ctx.beginPath(); ctx.moveTo(n.x, n.y - rad - 12); ctx.lineTo(n.x + 3.5, n.y - rad - 7); ctx.lineTo(n.x - 3.5, n.y - rad - 7); ctx.closePath(); ctx.fill(); }
-    if (a.account) { ctx.fillStyle = col + 'aa'; ctx.font = '10px ui-sans-serif, system-ui, sans-serif'; ctx.fillText(a.account, n.x, n.y + rad + 24); }
+    if (a.account) { ctx.fillStyle = tint(col, 67); ctx.font = '10px ui-sans-serif, system-ui, sans-serif'; ctx.fillText(a.account, n.x, n.y + rad + 24); }
     if (Math.hypot(mouse.x - n.x, mouse.y - n.y) < rad + 6) hover = a;
   }
   if (hover) {
     const label = `${hover.title ?? hover.id}${hover.account ? '  ·  ' + hover.account : ''}  ·  ${hover.status}`;
     ctx.font = '12px ui-sans-serif, system-ui, sans-serif'; const w = ctx.measureText(label).width + 16;
     const x = Math.min(Math.max(mouse.x - w / 2, 6), W - w - 6); const y = mouse.y - 34;
-    ctx.fillStyle = '#131d36'; ctx.strokeStyle = '#263558'; ctx.beginPath(); ctx.roundRect(x, y, w, 22, 5); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(label, x + 8, y + 15);
+    ctx.fillStyle = COLORS.panel; ctx.strokeStyle = COLORS.rule; ctx.beginPath(); ctx.roundRect(x, y, w, 22, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = COLORS.lead; ctx.textAlign = 'left'; ctx.fillText(label, x + 8, y + 15);
   }
   cv.style.cursor = hover ? 'pointer' : 'crosshair';
 }
