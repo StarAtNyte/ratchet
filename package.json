@@ -17,5 +17,11 @@
   "license": "MIT",
   "dependencies": {
     "@openai/codex-sdk": "^0.153.4"
-  }
+  },
+  "files": [
+    "bin",
+    "src",
+    "ui",
+    "README.md"
+  ]
 }

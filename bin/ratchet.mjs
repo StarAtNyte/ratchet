@@ -3,9 +3,14 @@ import { resolve } from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import { startServer } from '../src/server.mjs';
 
+import { readFileSync } from 'node:fs';
 const args = process.argv.slice(2);
+if (args.includes('-v') || args.includes('--version')) {
+  console.log(JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+  process.exit(0);
+}
 if (args.includes('-h') || args.includes('--help')) {
-  console.log(`ratchet [folder] [--port 7777] [--mock] [--no-open]
+  console.log(`ratchet [folder] [--port 7777] [--mock] [--no-open] [--version]
   folder    workspace the agent swarm works in (default: cwd)
   --mock    simulated agents, burns no quota (UI demo / testing)
   --no-open do not launch the browser`);
