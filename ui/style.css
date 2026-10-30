@@ -229,3 +229,59 @@ main.termMax { --gfrac: 0.15; }
 .gtools button { font: var(--text-xs) var(--font-body); background: var(--color-paper-2); color: var(--color-muted); border: 0; padding: var(--space-2xs) var(--space-sm); cursor: pointer; min-width: 32px; }
 .gtools button:hover { color: var(--color-ink); } .gtools button.on { color: var(--color-accent); }
 #graph:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+
+/* folder picker */
+.pickerBox { width: min(860px, 94vw); height: min(640px, 86vh); max-height: none; gap: var(--space-sm); }
+.pickHead { display: flex; align-items: baseline; gap: var(--space-sm); flex-wrap: wrap; }
+.crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3xs); padding: var(--space-xs); background: var(--color-paper-3); border: 1px solid var(--color-rule); font: var(--text-xs) var(--font-outlier); }
+.crumb { background: none; border: 0; color: var(--color-muted); font: inherit; padding: var(--space-3xs) var(--space-2xs); cursor: pointer; }
+.crumb:hover { color: var(--color-ink); background: var(--hover); } .crumb.on { color: var(--color-ink); }
+.crumbs .sep { color: var(--color-rule-2); }
+.pickGrid { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--space-sm); }
+.places { display: flex; flex-direction: column; gap: var(--space-2xs); overflow-y: auto; min-height: 0; }
+.places .pl { font-size: var(--text-xs); color: var(--color-muted); margin: var(--space-xs) 0 var(--space-3xs); }
+.place { display: grid; text-align: left; gap: 0; padding: var(--space-xs) var(--space-sm); }
+.place b { font-weight: 500; font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place small { color: var(--color-muted); font: var(--text-xs) var(--font-outlier); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.place.cur b { color: var(--color-accent); }
+.pickMain { display: flex; flex-direction: column; gap: var(--space-xs); min-height: 0; }
+.pickBar { display: flex; gap: var(--space-sm); align-items: center; }
+#pickFilter { flex: 1; background: var(--color-paper-3); color: var(--color-ink); border: 1px solid var(--color-rule); padding: var(--space-xs) var(--space-sm); font: var(--text-sm) var(--font-outlier); }
+#pickFilter:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+.dirs { flex: 1; min-height: 0; }
+.drow { display: flex; align-items: center; gap: var(--space-xs); padding: var(--space-xs) var(--space-sm); cursor: pointer; border-bottom: 1px solid var(--color-rule); }
+.drow:hover, .drow.on { background: var(--color-accent-soft); }
+.drow .dn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink); }
+.dirs div::before, .dirs .up::before { content: none; }
+.tags { display: inline-flex; gap: var(--space-2xs); }
+.tag { font: var(--text-xs) var(--font-outlier); color: var(--color-muted); border: 1px solid var(--color-rule); padding: 0 var(--space-2xs); }
+.tag.git { color: var(--color-cool); } .tag.runs, .tag.ratchet { color: var(--color-accent); }
+.pickFoot { display: flex; flex-direction: column; gap: var(--space-sm); border-top: 1px solid var(--color-rule); padding-top: var(--space-sm); }
+.pickSel { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; } .pickSel code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* responsive layout */
+#accToggle { display: none; }
+@media (max-width: 80rem) {
+  #app { grid-template-columns: minmax(0, 1fr) 340px; }
+  #accounts { position: fixed; top: 49px; left: 0; bottom: 0; width: 300px; z-index: var(--z-dropdown); transform: translateX(-100%); transition: transform var(--dur-short) var(--ease-out); border-right: 1px solid var(--color-rule-2); }
+  #accounts.open { transform: none; }
+  #accToggle { display: inline-block; }
+  .stats .stat:nth-child(n + 3) { display: none; }
+}
+@media (max-width: 56rem) {
+  html, body { overflow-y: auto; }
+  #app { height: auto; min-height: 100vh; grid-template: 48px minmax(0, 72vh) minmax(0, 60vh) / minmax(0, 1fr); }
+  #side { grid-column: 1; }
+  .stats, .kbd, .tcwd { display: none; }
+  .pickGrid { grid-template-columns: minmax(0, 1fr); } .places { display: none; }
+  .pickerBox { width: 100%; height: 100%; max-height: 100%; }
+  #drawer { width: 100%; }
+  .overview .ovStats { gap: var(--space-sm); }
+}
+.modal .crumb { background: none; border: 0; padding: var(--space-3xs) var(--space-2xs); font: var(--text-xs) var(--font-outlier); color: var(--color-muted); }
+.modal .crumb:hover { color: var(--color-ink); background: var(--hover); } .modal .crumb.on { color: var(--color-ink); }
+.modal .drow { border-bottom: 1px solid var(--color-rule); }
+.spark { display: flex; align-items: center; gap: var(--space-sm); } .spark dt { color: var(--color-muted); font-size: var(--text-xs); } .spark dd { margin: 0; font: var(--text-sm) var(--font-outlier); color: var(--color-accent); }
+.spark svg { display: block; overflow: visible; } .spark .all { fill: none; stroke: var(--color-rule-2); stroke-width: 1; } .spark .best { fill: none; stroke: var(--color-accent); stroke-width: 1.8; }
+.modal button#accToggle, #accToggle { background: none; color: var(--color-muted); cursor: pointer; font: var(--text-xs) var(--font-body); }
+#accToggle:hover { color: var(--color-ink); border-color: var(--color-rule-2); }

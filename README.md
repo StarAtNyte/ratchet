@@ -52,13 +52,27 @@ Flags: `--port <n>`, `--mock`, `--no-open`. The page URL carries a random token 
 
 Type a research task into the terminal at the bottom and press enter. The swarm graph, account pool, live feed, claim ledger and report fill in as it runs. Type `help` for commands.
 
+## Running in the background
+
+`ratchet` starts the app detached from your terminal and prints its link: closing the terminal or the browser tab does not stop it or its runs. Research runs keep going round after round, and the optimiser keeps mutating, until you stop them in the app (`stop run`, or `stop all`), run `ratchet stop`, or shut the computer down. `ratchet url` prints the link again; `ratchet --foreground` keeps it attached for debugging.
+
+To have it start at every login and restart if it crashes:
+
+```bash
+ratchet service install      # systemd user service with a stable URL
+ratchet service status | restart | logs | uninstall
+loginctl enable-linger $USER # optional: keep running while logged out
+```
+
+After a restart Ratchet reloads the workspace's earlier runs. A run that was cut off shows as interrupted with a **resume** button: agents that already finished are restored from disk and only the rest run again.
+
 ## The UI
 
 | Area | What it shows |
 | --- | --- |
 | Account pool (left) | One card per account: status LED, concurrency pips, current task, jobs done/failed, reset countdown when limited. |
-| Swarm graph (centre) | The lead, workers, sub-agents, verifiers and optimiser candidates as a live tree. Particles flow along edges of running agents; champions are ringed; click a node to filter the feed to it. |
-| Terminal (bottom) | Every action is a command. History with the arrow keys, tab completion. |
+| Swarm graph (centre) | The lead, workers, sub-agents, verifiers and optimiser candidates as a live graph, in a radial or a left-to-right **tree** layout. Scroll to zoom, drag to pan, double-click or **fit** to see everything, click a node for its details. The strip on top shows the run's status, elapsed time, agent counts, claim verdicts, busy accounts and, for optimiser runs, the best score so far. |
+| Terminal (bottom) | **Console**: every action is a command, with suggestions as you type, Tab completion of commands, run ids, account ids and folder paths, history kept across reloads, and quick-command buttons. **Shell**: a real login shell in the workspace (xterm.js over a small Python PTY bridge). Drag the divider to resize, or **expand**. |
 | Live / Claims / Report (right) | Streaming agent activity; the claim ledger with verdicts; the final Markdown report. |
 
 ## Accounts and harnesses

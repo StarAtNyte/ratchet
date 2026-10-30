@@ -434,7 +434,8 @@ function bbox(tg) {
   return { x0: x0 - 70, y0: y0 - 60, x1: x1 + padR, y1: y1 + 70 };
 }
 function fitTo(b, snap) {
-  const top = 70; const bottom = 40; // room for the run strip and legend
+  const ov = $('#overview'); const cvTop = cv.getBoundingClientRect().top;
+  const top = (ov.hidden ? 44 : ov.getBoundingClientRect().bottom - cvTop) + 16; const bottom = 44; // room for the run strip and legend
   const k = Math.min(1.6, Math.max(0.15, Math.min(W / (b.x1 - b.x0), (H - top - bottom) / (b.y1 - b.y0))));
   const x = W / 2 - ((b.x0 + b.x1) / 2) * k; const y = top + (H - top - bottom) / 2 - ((b.y0 + b.y1) / 2) * k;
   if (snap) Object.assign(view, { k, x, y }); else { view.k += (k - view.k) * 0.12; view.x += (x - view.x) * 0.12; view.y += (y - view.y) * 0.12; }
@@ -527,7 +528,7 @@ function frame(t) {
         ctx.textAlign = 'left'; ctx.fillStyle = S.focus === a.id ? COLORS.lead : COLORS.ink2;
         ctx.fillText(a.id === 'lead' ? name : `${name}  ${(a.title ?? '').slice(0, 26)}`, n.x + rad + 8 * u, n.y - 2 * u);
         ctx.font = `${10 * u}px system-ui, sans-serif`; ctx.fillStyle = tint(col, 75);
-        ctx.fillText([a.account ?? (a.id === 'lead' ? '' : 'waiting'), score].filter(Boolean).join('  '), n.x + rad + 8 * u, n.y + 11 * u);
+        if (58 * view.k >= 30) ctx.fillText([a.account ?? (a.id === 'lead' ? '' : 'waiting'), score].filter(Boolean).join('  '), n.x + rad + 8 * u, n.y + 11 * u);
       } else {
         ctx.textAlign = 'center'; ctx.fillStyle = S.focus === a.id ? COLORS.lead : COLORS.ink2;
         ctx.fillText(name, n.x, n.y + rad + 14 * u);
@@ -541,17 +542,6 @@ function frame(t) {
 
   // screen-space overlays: score curve and tooltip
   ctx.setTransform(d, 0, 0, d, 0, 0);
-  const sc = [...r.agents.values()].filter((a) => a.score != null && Number.isFinite(a.score) && a.ok !== false).sort((x, y) => (parseInt(x.id.slice(1)) || 0) - (parseInt(y.id.slice(1)) || 0));
-  if (sc.length > 1) {
-    const vals = sc.map((a) => a.score); const asc = vals[vals.length - 1] >= vals[0];
-    let best = vals[0]; const curve = vals.map((v) => (best = asc ? Math.max(best, v) : Math.min(best, v)));
-    const lo = Math.min(...vals); const hi = Math.max(...vals); const bx = W - 200; const by = H - 112; const bw = 180; const bh = 48;
-    ctx.fillStyle = COLORS.panel; ctx.strokeStyle = COLORS.rule; ctx.lineWidth = 1; ctx.beginPath(); ctx.rect(bx - 10, by - 24, bw + 20, bh + 36); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = COLORS.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`best ${curve[curve.length - 1].toFixed(3)} after ${sc.length} tries`, bx, by - 9);
-    const X = (i) => bx + (i / (curve.length - 1)) * bw; const Y = (v) => by + bh - ((v - lo) / (hi - lo || 1)) * bh;
-    ctx.strokeStyle = tint(COLORS.muted, 40); ctx.beginPath(); vals.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
-    ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.8; ctx.beginPath(); curve.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
-  }
   if (hover && !drag.on) {
     const label = `${hover.id}  ${hover.title ?? ''}${hover.account ? `  on ${hover.account}` : ''}  (${hover.status})`;
     ctx.font = '12px system-ui, sans-serif'; const w = ctx.measureText(label).width + 16;
@@ -589,6 +579,15 @@ requestAnimationFrame(frame);
 
 // ---------- run overview strip ----------
 const fmtAgo = (ms) => { const s = Math.floor(ms / 1000); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`; };
+function spark(ag) {
+  const sc = ag.filter((a) => a.score != null && Number.isFinite(a.score) && a.ok !== false).sort((x, y) => (x.born ?? 0) - (y.born ?? 0));
+  if (sc.length < 2) return '';
+  const vals = sc.map((a) => a.score); const minimize = vals[vals.length - 1] <= vals[0];
+  let best = vals[0]; const curve = vals.map((v) => (best = minimize ? Math.min(best, v) : Math.max(best, v)));
+  const lo = Math.min(...vals); const hi = Math.max(...vals); const w = 160; const h = 32;
+  const pts = (arr) => arr.map((v, i) => `${((i / (arr.length - 1)) * w).toFixed(1)},${(h - ((v - lo) / (hi - lo || 1)) * h).toFixed(1)}`).join(' ');
+  return `<div class="spark"><div><dt>best score</dt><dd>${curve[curve.length - 1].toFixed(3)}</dd></div><svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-label="best score over ${sc.length} tries"><polyline class="all" points="${pts(vals)}"/><polyline class="best" points="${pts(curve)}"/></svg></div>`;
+}
 function renderOverview() {
   const box = $('#overview'); const r = cur();
   if (!r) { box.hidden = true; return; }
@@ -600,7 +599,7 @@ function renderOverview() {
   const elapsed = (r.endedAt ?? Date.now()) - (r.startedAt ?? Date.now());
   const busy = [...S.accounts.values()].filter((a) => a.load > 0).map((a) => a.id);
   box.innerHTML = `<div class="ovTask"><span class="pill ${r.status === 'running' ? 'running' : r.status === 'done' ? 'done' : r.status === 'failed' || r.status === 'interrupted' ? 'failed' : ''}">${esc(r.status)}</span><b title="${esc(r.task)}">${esc(r.task)}</b></div>
-    <dl class="ovStats"><div><dt>elapsed</dt><dd>${fmtAgo(elapsed)}</dd></div><div><dt>running</dt><dd>${c('running')}</dd></div><div><dt>waiting</dt><dd>${c('queued')}</dd></div><div><dt>done</dt><dd>${c('done')}</dd></div><div><dt>failed</dt><dd>${c('failed')}</dd></div>${cl.length ? `<div><dt>claims</dt><dd><span class="okc">${v('confirmed')}</span> / <span class="unc">${v('unclear') + v('pending')}</span> / <span class="badc">${v('refuted')}</span></dd></div>` : ''}<div><dt>busy accounts</dt><dd>${busy.length ? esc(busy.join(', ')) : 'none'}</dd></div></dl>`;
+    <dl class="ovStats"><div><dt>elapsed</dt><dd>${fmtAgo(elapsed)}</dd></div><div><dt>running</dt><dd>${c('running')}</dd></div><div><dt>waiting</dt><dd>${c('queued')}</dd></div><div><dt>done</dt><dd>${c('done')}</dd></div><div><dt>failed</dt><dd>${c('failed')}</dd></div>${cl.length ? `<div><dt>claims</dt><dd><span class="okc">${v('confirmed')}</span> / <span class="unc">${v('unclear') + v('pending')}</span> / <span class="badc">${v('refuted')}</span></dd></div>` : ''}<div><dt>busy accounts</dt><dd>${busy.length ? esc(busy.join(', ')) : 'none'}</dd></div></dl>${spark(ag)}`;
 }
 setInterval(renderOverview, 1000);
 
@@ -624,32 +623,82 @@ const pk = { path: '', home: '' };
 const api = (u) => fetch(u + (u.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(token)).then((r) => r.json());
 const sendCmd = (line) => fetch('/api/cmd', { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ line }) });
 
+const pick = { dirs: [], meta: {}, sel: 0, filter: '' };
+const tagHtml = (tags) => (tags ?? []).map((t) => `<span class="tag ${t}">${esc(t)}</span>`).join('');
 async function browse(path) {
   const r = await api(`/api/ls?path=${encodeURIComponent(path ?? '')}${$('#pickHidden').checked ? '&hidden=1' : ''}`);
-  const box = $('#pickDirs'); box.innerHTML = '';
-  if (r.error) { box.append(el('div', 'err', esc(r.error))); return; }
+  if (r.error) { $('#pickDirs').innerHTML = `<div class="err">${esc(r.error)}</div>`; return; }
   pk.path = r.path; pk.home = r.home;
-  $('#pickPath').value = r.path;
-  const up = el('div', 'up', '..'); up.onclick = () => browse(r.parent); box.append(up);
-  r.dirs.forEach((d) => { const row = el('div', '', esc(d)); row.onclick = () => browse(`${r.path.replace(/\/$/, '')}/${d}`); box.append(row); });
-  if (!r.dirs.length) box.append(el('div', 'err', 'no subfolders'));
+  Object.assign(pick, { dirs: r.dirs, meta: r.meta ?? {}, sel: 0, filter: '' });
+  $('#pickFilter').value = '';
+  $('#pickPath').textContent = r.path;
+  $('#pickTags').innerHTML = tagHtml(r.here);
+  const crumbs = $('#pickCrumbs'); crumbs.innerHTML = '';
+  const parts = r.path.split('/').filter(Boolean);
+  const root = el('button', 'crumb', '/'); root.type = 'button'; root.onclick = () => browse('/'); crumbs.append(root);
+  parts.forEach((part, i) => {
+    const b = el('button', `crumb${i === parts.length - 1 ? ' on' : ''}`); b.type = 'button'; b.textContent = part;
+    b.onclick = () => browse(`/${parts.slice(0, i + 1).join('/')}`);
+    crumbs.append(el('span', 'sep', '/'), b);
+  });
+  renderDirs();
 }
-function openPicker() {
+function renderDirs() {
+  const box = $('#pickDirs'); box.innerHTML = '';
+  const q = pick.filter.toLowerCase();
+  const shown = pick.dirs.filter((d) => d.toLowerCase().includes(q));
+  pick.sel = Math.min(pick.sel, Math.max(0, shown.length));
+  const up = el('div', `drow up${pick.sel === 0 ? ' on' : ''}`, '<span class="dn">..</span><span class="muted2">parent folder</span>');
+  up.setAttribute('role', 'option'); up.onclick = () => browse(pk.path.replace(/\/[^/]+\/?$/, '') || '/');
+  box.append(up);
+  shown.forEach((d, i) => {
+    const row = el('div', `drow${pick.sel === i + 1 ? ' on' : ''}`, `<span class="dn">${esc(d)}</span>${tagHtml(pick.meta[d])}`);
+    row.setAttribute('role', 'option');
+    row.onclick = () => browse(`${pk.path.replace(/\/$/, '')}/${d}`);
+    box.append(row);
+  });
+  if (!shown.length) box.append(el('div', 'err', q ? 'no folder matches' : 'no subfolders'));
+  box.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+  pick.shown = shown;
+}
+function renderPlaces() {
+  const box = $('#pickPlaces'); box.innerHTML = '';
+  const add = (label, path, cls = '') => { const b = el('button', `place ${cls}`); b.type = 'button'; b.title = path; b.innerHTML = `<b>${esc(label)}</b><small>${esc(path)}</small>`; b.onclick = () => browse(path); box.append(b); };
+  box.append(el('div', 'pl', 'Places'));
+  add('Current workspace', S.settings.dir, 'cur');
+  if (pk.home) add('Home', pk.home);
+  const rec = (S.settings.recent ?? []).filter((d) => d !== S.settings.dir).slice(0, 6);
+  if (rec.length) { box.append(el('div', 'pl', 'Recent')); rec.forEach((d) => add(d.split('/').filter(Boolean).pop() || '/', d)); }
+}
+async function openPicker() {
   $('#picker').hidden = false;
-  const rec = $('#pickRecent'); rec.innerHTML = '';
-  (S.settings.recent ?? []).forEach((d) => { const b = el('button', ''); b.type = 'button'; b.textContent = d; b.title = d; b.onclick = () => browse(d); rec.append(b); });
-  browse(S.settings.dir);
-  $('#pickPath').focus();
+  await browse(S.settings.dir);
+  renderPlaces();
+  $('#pickFilter').focus();
 }
 const closePicker = () => { $('#picker').hidden = true; $('#termIn').focus(); };
 $('#ws').onclick = openPicker;
 $('#pickCancel').onclick = closePicker;
 $('#picker').addEventListener('mousedown', (e) => { if (e.target.id === 'picker') closePicker(); });
-$('#pickForm').addEventListener('submit', (e) => { e.preventDefault(); browse($('#pickPath').value); });
+$('#pickFilter').addEventListener('input', (e) => { pick.filter = e.target.value.startsWith('/') || e.target.value.startsWith('~') ? '' : e.target.value; pick.sel = pick.filter ? 1 : 0; renderDirs(); });
+$('#pickFilter').addEventListener('keydown', (e) => {
+  const n = (pick.shown?.length ?? 0) + 1;
+  if (e.key === 'ArrowDown') { e.preventDefault(); pick.sel = (pick.sel + 1) % n; renderDirs(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); pick.sel = (pick.sel - 1 + n) % n; renderDirs(); }
+  else if (e.key === 'Backspace' && !e.target.value) { e.preventDefault(); browse(pk.path.replace(/\/[^/]+\/?$/, '') || '/'); }
+  else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('#pickUse').click(); }
+});
+$('#pickForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const v = $('#pickFilter').value.trim();
+  if (v.startsWith('/') || v.startsWith('~')) return browse(v);
+  if (pick.sel === 0) return browse(pk.path.replace(/\/[^/]+\/?$/, '') || '/');
+  const d = pick.shown?.[pick.sel - 1]; if (d) browse(`${pk.path.replace(/\/$/, '')}/${d}`);
+});
 $('#pickHidden').onchange = () => browse(pk.path);
 $('#pickUse').onclick = async () => { await sendCmd(`dir ${pk.path}`); closePicker(); };
 $('#pickNew').onclick = async () => {
-  const name = prompt('New folder name (created inside the current folder):');
+  const name = prompt('New folder name (created inside the selected folder):');
   if (!name) return;
   await sendCmd(`dir mk ${pk.path.replace(/\/$/, '')}/${name}`);
   closePicker();
@@ -855,3 +904,6 @@ $('#agRun').onclick = async () => {
   setTimeout(() => openAgent(j.agentId), 200);
 };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#agentModal').hidden) $('#agentModal').hidden = true; });
+
+$('#accToggle').onclick = () => $('#accounts').classList.toggle('open');
+document.addEventListener('mousedown', (e) => { const a = $('#accounts'); if (a.classList.contains('open') && !a.contains(e.target) && e.target.id !== 'accToggle') a.classList.remove('open'); });

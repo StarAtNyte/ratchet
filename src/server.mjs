@@ -40,7 +40,7 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
   let seq = 0;
 
   const emit = (ev) => {
-    const e = { ...ev, seq: ++seq, t: Date.now() };
+    const e = { ...ev, seq: ++seq, t: ev.t ?? Date.now() };
     history.push(e);
     if (history.length > MAX_EVENTS) history.splice(0, history.length - MAX_EVENTS);
     const data = `data: ${JSON.stringify(e)}\n\n`;
@@ -134,7 +134,14 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
         const dirs = readdirSync(path, { withFileTypes: true })
           .filter((d) => d.isDirectory() && (url.searchParams.get('hidden') === '1' || !d.name.startsWith('.')))
           .map((d) => d.name).sort((a, b) => a.localeCompare(b));
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ path, parent: dirname(path), dirs, home: homedir() }));
+        const MARK = [['.git', 'git'], ['package.json', 'node'], ['pyproject.toml', 'python'], ['requirements.txt', 'python'], ['Cargo.toml', 'rust'], ['go.mod', 'go'], ['ratchet.json', 'ratchet'], ['.ratchet', 'runs']];
+        const meta = {};
+        for (const d of dirs.slice(0, 400)) {
+          const tags = MARK.filter(([f]) => existsSync(join(path, d, f))).map(([, tag]) => tag);
+          if (tags.length) meta[d] = [...new Set(tags)];
+        }
+        const here = [...new Set(MARK.filter(([f]) => existsSync(join(path, f))).map(([, tag]) => tag))];
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ path, parent: dirname(path), dirs, meta, here, home: homedir() }));
       } catch (e) { res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: e.message, path })); }
       return;
     }

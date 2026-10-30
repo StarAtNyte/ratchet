@@ -23,6 +23,7 @@
       <span class="word">Ratchet</span>
       <span class="tag">swarm research</span>
     </div>
+    <button type="button" class="chip" id="accToggle" aria-controls="accounts">accounts</button>
     <button class="ws" id="ws" title="change workspace folder"></button>
     <div class="chip mock" id="mockChip" hidden>mock</div>
     <div class="stats" id="stats"></div>
@@ -92,17 +93,19 @@
   </aside>
 </div>
 <div id="picker" class="modal" hidden>
-  <div class="box">
-    <h3>Workspace folder</h3>
-    <form id="pickForm"><input id="pickPath" spellcheck="false" placeholder="/path/to/folder"><button type="submit">go</button></form>
-    <div class="recent" id="pickRecent"></div>
-    <div class="dirs" id="pickDirs"></div>
-    <div class="actions">
-      <label><input type="checkbox" id="pickHidden"> hidden</label>
-      <button id="pickNew" type="button">new folder</button>
-      <span class="grow"></span>
-      <button id="pickCancel" type="button">cancel</button>
-      <button id="pickUse" type="button" class="primary">use this folder</button>
+  <div class="box pickerBox" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
+    <div class="pickHead"><h3 id="pickTitle">Workspace folder</h3><span class="muted2">Agents read and write inside the folder you pick.</span></div>
+    <nav class="crumbs" id="pickCrumbs" aria-label="Current folder"></nav>
+    <div class="pickGrid">
+      <aside class="places" id="pickPlaces" aria-label="Places"></aside>
+      <div class="pickMain">
+        <form id="pickForm" class="pickBar"><input id="pickFilter" spellcheck="false" placeholder="filter, or type a path and press Enter" aria-label="Filter folders or type a path"><label class="muted2"><input type="checkbox" id="pickHidden"> hidden</label></form>
+        <div class="dirs" id="pickDirs" role="listbox" aria-label="Folders"></div>
+      </div>
+    </div>
+    <div class="pickFoot">
+      <div class="pickSel"><span class="muted2">Selected</span><code id="pickPath"></code><span id="pickTags" class="tags"></span></div>
+      <div class="actions"><button id="pickNew" type="button">new folder</button><span class="grow"></span><button id="pickCancel" type="button">cancel</button><button id="pickUse" type="button" class="primary">use this folder</button></div>
     </div>
   </div>
 </div>
