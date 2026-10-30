@@ -1,0 +1,21 @@
+{
+  "name": "ratchet",
+  "version": "0.1.0",
+  "description": "Swarm research harness: many agents, many accounts, one web terminal. Sister tool to Evidra.",
+  "type": "module",
+  "bin": {
+    "ratchet": "./bin/ratchet.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node bin/ratchet.mjs",
+    "demo": "node bin/ratchet.mjs --mock",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@openai/codex-sdk": "^0.153.4"
+  }
+}

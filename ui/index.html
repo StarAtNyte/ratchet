@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RATCHET</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%233df5c8' stroke-width='4' stroke-dasharray='5 3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <svg id="gear" viewBox="-50 -50 100 100" aria-hidden="true">
+        <g id="gearRot">
+          <path d="M0-44l6 0 3 9 8 3 9-4 8 8-4 9 3 8 9 3v12l-9 3-3 8 4 9-8 8-9-4-8 3-3 9h-12l-3-9-8-3-9 4-8-8 4-9-3-8-9-3v-12l9-3 3-8-4-9 8-8 9 4 8-3 3-9z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          <circle r="14" fill="none" stroke="currentColor" stroke-width="3"/>
+        </g>
+        <path d="M44-6l12 6-12 6z" fill="var(--hot)"/>
+      </svg>
+      <span class="word">RATCHET</span>
+      <span class="tag">swarm research</span>
+    </div>
+    <div class="ws" id="ws" title="workspace"></div>
+    <div class="stats" id="stats"></div>
+    <div class="chip" id="modeChip">auto</div>
+    <div class="chip live" id="conn">connecting</div>
+    <div class="clock" id="clock"></div>
+  </header>
+
+  <aside id="accounts">
+    <h2><span>ACCOUNT POOL</span><em id="poolSum"></em></h2>
+    <div id="accList"></div>
+    <div class="hint">add one: <code>account add claude</code></div>
+  </aside>
+
+  <main>
+    <section id="graphWrap">
+      <div class="runbar" id="runbar"></div>
+      <canvas id="graph"></canvas>
+      <div class="legend"><i class="c-claude"></i>claude <i class="c-codex"></i>codex <i class="c-lead"></i>lead <i class="c-bad"></i>failed</div>
+      <div class="empty" id="graphEmpty">
+        <div class="big">NO ACTIVE SWARM</div>
+        <div>type a research task below and press enter</div>
+      </div>
+    </section>
+    <section id="term">
+      <div id="termOut"></div>
+      <form id="termForm" autocomplete="off">
+        <span class="prompt">ratchet<b>❯</b></span>
+        <input id="termIn" spellcheck="false" autofocus placeholder="describe a research task, or type help">
+      </form>
+    </section>
+  </main>
+
+  <aside id="side">
+    <nav>
+      <button data-tab="feed" class="on">LIVE</button>
+      <button data-tab="claims">CLAIMS <span id="claimN">0</span></button>
+      <button data-tab="report">REPORT</button>
+    </nav>
+    <div class="pane on" id="feed"></div>
+    <div class="pane" id="claims"></div>
+    <div class="pane" id="report"><div class="muted">report appears when the swarm finishes</div></div>
+    <div class="focus" id="focus" hidden></div>
+  </aside>
+</div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

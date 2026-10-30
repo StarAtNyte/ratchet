@@ -1,0 +1,90 @@
+import { createServer } from 'node:http';
+import { readFileSync, existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { dirname, join, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { AccountPool } from './accounts.mjs';
+import { Swarm } from './swarm.mjs';
+import { Optimizer } from './optimizer.mjs';
+import { execCommand, COMMANDS } from './commands.mjs';
+
+const UI = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
+const MAX_EVENTS = 4000;
+
+export async function startServer({ dir, port, mock, open }) {
+  const token = randomBytes(16).toString('hex');
+  const clients = new Set();
+  const history = [];
+  let seq = 0;
+
+  const emit = (ev) => {
+    const e = { ...ev, seq: ++seq, t: Date.now() };
+    history.push(e);
+    if (history.length > MAX_EVENTS) history.splice(0, history.length - MAX_EVENTS);
+    const data = `data: ${JSON.stringify(e)}\n\n`;
+    for (const c of clients) c.write(data);
+  };
+
+  const settings = { dir, mode: 'auto', mock, slots: 2, workers: 6 };
+  const pool = new AccountPool(emit, { mock });
+  const swarm = new Swarm({ pool, emit, settings });
+  const optimizer = new Optimizer(swarm);
+  const say = (text, cls = '') => emit({ kind: 'term', text, cls });
+
+  const guard = (req, res) => {
+    const host = (req.headers.host ?? '').split(':')[0];
+    if (host !== '127.0.0.1' && host !== 'localhost') { res.writeHead(403).end('bad host'); return false; }
+    return true;
+  };
+  const authed = (req, url) => (req.headers['x-ratchet-token'] ?? url.searchParams.get('t')) === token;
+
+  const server = createServer(async (req, res) => {
+    if (!guard(req, res)) return;
+    const url = new URL(req.url, 'http://x');
+
+    if (url.pathname === '/api/events') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+      res.write(`data: ${JSON.stringify({ kind: 'hello', settings, commands: COMMANDS, seq: 0, t: Date.now() })}\n\n`);
+      for (const e of history) res.write(`data: ${JSON.stringify(e)}\n\n`);
+      pool.publishAll();
+      clients.add(res);
+      const ka = setInterval(() => res.write(': ka\n\n'), 20000);
+      req.on('close', () => { clearInterval(ka); clients.delete(res); });
+      return;
+    }
+
+    if (url.pathname === '/api/cmd' && req.method === 'POST') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      let body = '';
+      for await (const c of req) { body += c; if (body.length > 1e5) return void res.writeHead(413).end(); }
+      let line = '';
+      try { line = String(JSON.parse(body).line ?? ''); } catch { return void res.writeHead(400).end(); }
+      res.writeHead(204).end();
+      say(`❯ ${line}`, 'echo');
+      try { await execCommand(line, { say, swarm, pool, settings, optimizer }); }
+      catch (e) { say(`error: ${e.message}`, 'err'); }
+      return;
+    }
+
+    const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+    const p = join(UI, file);
+    if (!p.startsWith(UI) || !existsSync(p)) return void res.writeHead(404).end('not found');
+    res.writeHead(200, { 'content-type': `${MIME[extname(p)] ?? 'text/plain'}; charset=utf-8`, 'cache-control': 'no-store' });
+    res.end(readFileSync(p));
+  });
+
+  await new Promise((ok, fail) => { server.once('error', fail); server.listen(port, '127.0.0.1', ok); });
+  const link = `http://127.0.0.1:${port}/?t=${token}`;
+  console.log(`\n  RATCHET  ${mock ? '(mock agents)' : ''}\n  workspace  ${dir}\n  open       ${link}\n`);
+  if (open) spawn('xdg-open', [link], { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
+
+  say(`workspace ${dir}`, 'dim');
+  say('type a research task and press enter, or "help"', 'dim');
+  const shutdown = () => { swarm.stop('all'); server.close(); process.exit(0); };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  return server;
+}
