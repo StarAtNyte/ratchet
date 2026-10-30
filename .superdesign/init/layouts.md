@@ -1,0 +1,140 @@
+# App shell: ui/index.html
+Single dashboard shell, navigation, terminal, dialogs and drawer.
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="description" content="Ratchet: a web terminal that runs a swarm of coding agents across your accounts and checks their claims.">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ratchet</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%233df5c8' stroke-width='4' stroke-dasharray='5 3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <svg id="gear" viewBox="-50 -50 100 100" aria-hidden="true">
+        <g id="gearRot">
+          <path d="M0-44l6 0 3 9 8 3 9-4 8 8-4 9 3 8 9 3v12l-9 3-3 8 4 9-8 8-9-4-8 3-3 9h-12l-3-9-8-3-9 4-8-8 4-9-3-8-9-3v-12l9-3 3-8-4-9 8-8 9 4 8-3 3-9z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          <circle r="14" fill="none" stroke="currentColor" stroke-width="3"/>
+        </g>
+        <path d="M44-6l12 6-12 6z" fill="var(--hot)"/>
+      </svg>
+      <span class="word">Ratchet</span>
+      <span class="tag">swarm research</span>
+    </div>
+    <button type="button" class="chip" id="accToggle" aria-controls="accounts">accounts</button>
+    <button class="ws" id="ws" title="change workspace folder"></button>
+    <div class="chip mock" id="mockChip" hidden>mock</div>
+    <div class="stats" id="stats"></div>
+    <div class="chip" id="modeChip">auto</div>
+    <div class="chip live" id="conn">connecting</div>
+    <div class="clock" id="clock"></div>
+  </header>
+
+  <aside id="accounts">
+    <h2><span>Accounts</span><span class="h2r"><em id="poolSum"></em><button id="addAcc" type="button">+ Add</button></span></h2>
+    <div id="accList"></div>
+    <div class="hint">add one: <code>account add claude</code></div>
+  </aside>
+
+  <main>
+    <section id="graphWrap">
+      <div class="runbar" id="runbar"></div>
+      <div class="overview" id="overview" hidden></div>
+      <div class="gtools" role="toolbar" aria-label="Graph view"><button type="button" id="gFit" title="Fit everything (double-click the graph or press F)">fit</button><button type="button" id="gOut" title="Zoom out">−</button><button type="button" id="gIn" title="Zoom in">+</button><button type="button" id="gLayout" title="Switch layout">tree</button></div>
+      <canvas id="graph" aria-label="Agent swarm graph: each node is an agent, edges show who spawned whom"></canvas>
+      <div class="legend"><span><i class="c-claude"></i>claude</span><span><i class="c-codex"></i>codex</span><span><i class="c-antigravity"></i>antigravity</span><span><i class="c-bad"></i>failed</span></div>
+      <div class="empty" id="graphEmpty">
+        <div class="big">No active run</div>
+        <div>type a research task below and press enter</div>
+      </div>
+    </section>
+    <div class="splitter" id="split" role="separator" aria-orientation="horizontal" aria-label="Resize the graph and terminal" tabindex="0"></div>
+    <section id="term">
+      <div class="termbar">
+        <div class="ttabs" role="tablist">
+          <button type="button" data-tt="console" class="on" role="tab">Console</button>
+          <button type="button" data-tt="shell" role="tab">Shell</button>
+        </div>
+        <span class="tcwd" id="tcwd"></span>
+        <div class="tacts">
+          <button type="button" id="tNewShell" hidden>new shell</button>
+          <button type="button" id="tClear">clear</button>
+          <button type="button" id="tMax">expand</button>
+        </div>
+      </div>
+      <div class="tview on" id="consoleView">
+        <div id="termOut" aria-live="polite"></div>
+        <div id="suggest" role="listbox" hidden></div>
+        <div class="quick" id="quick"></div>
+        <form id="termForm" autocomplete="off">
+          <span class="prompt">›</span>
+          <input id="termIn" spellcheck="false" autofocus placeholder="describe a research task, or type a command (Tab completes)">
+          <span class="kbd"><kbd>Tab</kbd> complete <kbd>↑</kbd> history</span>
+        </form>
+      </div>
+      <div class="tview" id="shellView"><div id="xterm"></div></div>
+    </section>
+  </main>
+
+  <aside id="side">
+    <nav>
+      <button data-tab="feed" class="on">Activity</button>
+      <button data-tab="agents">Agents <span id="agentN">0</span></button>
+      <button data-tab="claims">Claims <span id="claimN">0</span></button>
+      <button data-tab="report">Report</button>
+    </nav>
+    <div class="pane on" id="feed"></div>
+    <div class="pane" id="agents"></div>
+    <div class="pane" id="claims"></div>
+    <div class="pane" id="report"><div class="muted">report appears when the swarm finishes</div></div>
+    <div class="focus" id="focus" hidden></div>
+  </aside>
+</div>
+<div id="picker" class="modal" hidden>
+  <div class="box pickerBox" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
+    <div class="pickHead"><h3 id="pickTitle">Workspace folder</h3><span class="muted2">Agents read and write inside the folder you pick.</span></div>
+    <nav class="crumbs" id="pickCrumbs" aria-label="Current folder"></nav>
+    <div class="pickGrid">
+      <aside class="places" id="pickPlaces" aria-label="Places"></aside>
+      <div class="pickMain">
+        <form id="pickForm" class="pickBar"><input id="pickFilter" spellcheck="false" placeholder="filter, or type a path and press Enter" aria-label="Filter folders or type a path"><label class="muted2"><input type="checkbox" id="pickHidden"> hidden</label></form>
+        <div class="dirs" id="pickDirs" role="listbox" aria-label="Folders"></div>
+      </div>
+    </div>
+    <div class="pickFoot">
+      <div class="pickSel"><span class="muted2">Selected</span><code id="pickPath"></code><span id="pickTags" class="tags"></span></div>
+      <div class="actions"><button id="pickNew" type="button">new folder</button><span class="grow"></span><button id="pickCancel" type="button">cancel</button><button id="pickUse" type="button" class="primary">use this folder</button></div>
+    </div>
+  </div>
+</div>
+<div id="agentModal" class="modal" hidden>
+  <div class="box">
+    <h3>Add agent</h3>
+    <div class="muted2">Run one agent on the workspace. Pick a harness, optionally pin an account, and tell it what to do.</div>
+    <div id="agHarness" class="seg"></div>
+    <div class="fieldrow"><label for="agAccount">Account</label><select id="agAccount"></select></div>
+    <div class="fieldrow"><label for="agTitle">Name</label><input id="agTitle" spellcheck="false" placeholder="short label, optional"></div>
+    <textarea id="agPrompt" rows="6" spellcheck="false" placeholder="What should this agent do?"></textarea>
+    <div class="actions"><span id="agErr" class="err"></span><span class="grow"></span><button id="agCancel" type="button">cancel</button><button id="agRun" type="button" class="primary">run agent</button></div>
+  </div>
+</div>
+<div id="addModal" class="modal" hidden>
+  <div class="box">
+    <h3 id="addTitle">Add account</h3>
+    <div id="addBody"></div>
+    <div class="actions"><button id="addBack" type="button" hidden>back</button><span class="grow"></span><button id="addCancel" type="button">cancel</button><button id="addDone" type="button" class="primary" hidden>done</button></div>
+  </div>
+</div>
+<aside id="drawer" hidden><div class="dhead"><b id="dtitle"></b><button id="dclose" type="button">close</button></div><div id="dbody"></div></aside>
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<script src="/app.js" type="module"></script>
+</body>
+</html>
+
+```

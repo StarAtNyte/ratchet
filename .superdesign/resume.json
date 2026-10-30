@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "/": {
+      "targetKind": "existing-ui",
+      "projectId": "8e1ee50a-15ad-4722-aab0-963ae826fe7d",
+      "baselineDraftId": "d3a7af40-47fe-4929-822c-198d5577d2b9",
+      "activeDraftId": "d3a7af40-47fe-4929-822c-198d5577d2b9",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "ui/index.html",
+        "ui/style.css",
+        "ui/tokens.css",
+        "ui/base.css"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "f61111211d5253db363080a61a3bac8aa81c80e7ffa6df3db6e9a6c8988e5673",
+        "ui/index.html": "8c14bad6d5e744271a267cffb393a17fed17f2bd535b0d57133d0ba8b1e69e39",
+        "ui/style.css": "fed87f2e13cd1810c6f746a8b5574de86d488f9dfd12afc1a13b5ae5c7bcbf2b",
+        "ui/tokens.css": "2d837df5c52bb5a2c2b2a05c3778797d03e93bf7cf71d1caef9b9779631cc26d",
+        "ui/base.css": "61e820f27bf2646f8e175d2f773d13e3c7e860b2324190c1c65d80cdfdd70725"
+      },
+      "components": [],
+      "drafts": {
+        "d3a7af40-47fe-4929-822c-198d5577d2b9": {
+          "description": "Professional full-dashboard redesign with terminal and activity",
+          "currentVersion": 3
+        }
+      },
+      "updatedAt": "2026-10-30T15:21:40.352287+00:00"
+    }
+  }
+}

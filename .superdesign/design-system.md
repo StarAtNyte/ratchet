@@ -1,0 +1,2 @@
+# Ratchet design system
+Operational desktop dashboard for coordinating coding-agent swarms. Preserve the existing dark charcoal surfaces, warm amber accent, semantic green/red status, Host Grotesk and Atkinson Hyperlegible Mono with system fallbacks. Use compact, legible controls, subtle borders and restrained 10px corners. Preserve the gear identity and the accounts, graph, terminal and activity workflows.
