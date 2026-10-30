@@ -181,6 +181,11 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       return void res.writeHead(204).end();
     }
 
+    if (url.pathname === '/api/forge/tasks' && req.method === 'GET') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ tasks: forge.listTasks() }));
+    }
+
     if (url.pathname === '/api/forge' && req.method === 'POST') {
       if (!authed(req, url)) return void res.writeHead(401).end();
       let body = ''; for await (const c of req) { body += c; if (body.length > 20000) return void res.writeHead(413).end(); }

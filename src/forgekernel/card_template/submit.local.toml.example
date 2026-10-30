@@ -1,0 +1,5 @@
+# Copy to submit.local.toml (gitignored) for anything that must not be committed: it is
+# merged over submit.toml table by table.
+
+[env]
+# FK_REF_KEY = "..."            # a sealed reference's key (forge run writes this itself)

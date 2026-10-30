@@ -24,6 +24,20 @@
     "bin",
     "src",
     "ui",
-    "README.md"
+    "README.md",
+    "global_config",
+    "hw_kb",
+    "kernels",
+    "skills",
+    "meta",
+    "meta_milestone.md",
+    "scripts",
+    "tasks",
+    "pyproject.toml",
+    "LICENSE-forgekernel",
+    "NOTICE-forgekernel",
+    "docs",
+    "local.env.example",
+    "FORGEKERNEL-ORIGIN.md"
   ]
 }

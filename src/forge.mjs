@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve, delimiter } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { LIMIT_RE, parseReset } from './harness.mjs';
 import { homedir } from 'node:os';
 import { HOME } from './accounts.mjs';
 
@@ -15,39 +17,37 @@ export function deviceEnv(device) {
 }
 
 export class ForgeSwarm {
-  constructor(swarm, { binary, configFile = join(HOME, 'forge.json') } = {}) {
+  constructor(swarm, { binary } = {}) {
     this.swarm = swarm;
-    this.configFile = configFile;
-    let saved = {};
-    try { saved = JSON.parse(readFileSync(configFile, 'utf8')); } catch {}
-    this.binary = binary || process.env.RATCHET_FORGE_BIN || saved.binary || join(HOME, 'forgekernel-venv', 'bin', 'forge');
-    this.checkout = saved.checkout || null;
+    this.root = dirname(dirname(fileURLToPath(import.meta.url)));
+    this.binary = binary || join(HOME, 'kernel-venv', 'bin', 'python');
+    this.injectedBinary = !!binary;
+    this.setupPromise = null;
   }
 
-  async use(path, cwd) {
-    if (process.env.RATCHET_FORGE_BIN) throw new Error('RATCHET_FORGE_BIN overrides the saved checkout; unset it before changing the checkout.');
-    const expanded = String(path).replace(/^~(?=$|\/)/, homedir());
-    let checkout = resolve(cwd, expanded);
-    if (basename(checkout) === 'forgekernel' && basename(dirname(checkout)) === 'src') checkout = dirname(dirname(checkout));
-    else if (basename(checkout) === 'src') checkout = dirname(checkout);
-    const binary = join(checkout, '.venv', 'bin', 'forge');
-    if (!existsSync(join(checkout, 'src', 'forgekernel', '__main__.py')) || !existsSync(join(checkout, 'pyproject.toml'))) throw new Error(`Not a ForgeKernel checkout: ${checkout}`);
-    try { accessSync(binary, constants.X_OK); } catch { throw new Error(`ForgeKernel executable not found: ${binary}. Install it into the checkout's .venv first.`); }
-    const previous = this.binary; this.binary = binary;
-    const result = await this.command(['--version'], { cwd: checkout });
-    if (!result.ok || !/forgekernel/i.test(result.output)) { this.binary = previous; throw new Error(`Could not verify ForgeKernel: ${result.error || result.output}`); }
-    this.checkout = checkout;
-    mkdirSync(dirname(this.configFile), { recursive: true });
-    const temp = `${this.configFile}.${process.pid}.tmp`;
-    writeFileSync(temp, JSON.stringify({ checkout, binary }, null, 2) + '\n', { mode: 0o600 });
-    renameSync(temp, this.configFile);
-    return { checkout, binary, version: result.output.trim() };
+  async ensureRuntime() {
+    const ready = join(dirname(dirname(this.binary)), '.ratchet-ready');
+    if (this.injectedBinary || (existsSync(this.binary) && existsSync(ready))) return;
+    if (!this.setupPromise) this.setupPromise = (async () => {
+      const run = (bin, args) => new Promise((done, fail) => {
+        const child = spawn(bin, args, { cwd: this.root, stdio: ['ignore', 'ignore', 'pipe'] }); let error = '';
+        child.stderr.on('data', (data) => { error = (error + data).slice(-4000); });
+        child.on('error', fail); child.on('close', (code) => code === 0 ? done() : fail(new Error(error.trim() || `${bin} exited ${code}`)));
+      });
+      const venv = dirname(dirname(this.binary));
+      await run('python3', ['-m', 'venv', venv]);
+      await run(join(venv, 'bin', 'python'), ['-m', 'pip', 'install', 'modal>=1.6,<2']);
+      writeFileSync(ready, 'Ratchet kernel runtime\n', { mode: 0o600 });
+    })().catch((error) => { this.setupPromise = null; throw new Error(`Kernel runtime setup failed: ${error.message}`); });
+    return this.setupPromise;
   }
 
   async command(args, { cwd, env = {}, signal, log = () => {} } = {}) {
     if (signal?.aborted) return { ok: false, error: 'stopped' };
     return new Promise((resolveResult) => {
-      const child = spawn(this.binary, args, { cwd, env: { ...process.env, ...env }, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+      const childEnv = { ...process.env, PYTHONPATH: [join(this.root, 'src'), process.env.PYTHONPATH].filter(Boolean).join(delimiter), RATCHET_FORGE_ENV: join(HOME, 'forge.env'), ...env };
+      delete childEnv.CLAUDECODE; delete childEnv.CLAUDE_CODE_ENTRYPOINT;
+      const child = spawn(this.binary, this.injectedBinary ? args : ['-m', 'forgekernel', ...args], { cwd, env: childEnv, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
       let output = ''; let error = ''; let settled = false;
       const onAbort = () => { try { if (process.platform === 'win32') child.kill('SIGTERM'); else process.kill(-child.pid, 'SIGTERM'); } catch {} };
       signal?.addEventListener('abort', onAbort, { once: true });
@@ -64,9 +64,26 @@ export class ForgeSwarm {
     });
   }
 
+  listTasks() {
+    const dir = join(this.root, 'tasks');
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && !entry.name.startsWith('_') && existsSync(join(dir, entry.name, 'task.toml'))).map((entry) => ({ name: entry.name, value: `builtin:${entry.name}` })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  resolveTask(task, cwd) {
+    const value = String(task);
+    if (value.startsWith('builtin:')) {
+      const name = value.slice('builtin:'.length);
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) throw new Error('Invalid built-in task name.');
+      return join(this.root, 'tasks', name);
+    }
+    return resolve(cwd, value.replace(/^~(?=$|\/)/, homedir()));
+  }
+
   async check(task, cwd, device = null) {
-    const path = String(task).replace(/^~(?=$|\/)/, homedir());
-    return this.command(['new', resolve(cwd, path), '--dry-run'], { cwd, env: deviceEnv(device) });
+    const path = this.resolveTask(task, cwd);
+    await this.ensureRuntime();
+    return this.command(['new', path, '--dry-run'], { cwd, env: deviceEnv(device) });
   }
 
   start(tasks, device = null) {
@@ -74,7 +91,7 @@ export class ForgeSwarm {
     const overrides = deviceEnv(device);
     if (!tasks.length) throw new Error('Usage: forge start <task-directory> [task-directory ...]');
     if (tasks.length > 12) throw new Error('At most 12 ForgeKernel campaigns can be started together.');
-    const paths = tasks.map((task) => resolve(cwd, String(task).replace(/^~(?=$|\/)/, homedir())));
+    const paths = tasks.map((task) => this.resolveTask(task, cwd));
     for (const task of paths) if (!existsSync(join(task, 'task.toml'))) throw new Error(`No task.toml in ${task}`);
     const run = this.swarm.newRun(`ForgeKernel: ${paths.map((path) => basename(path)).join(', ')}`, 'forge');
     this.drive(run, paths, cwd, overrides).catch((error) => this.swarm.end(run, 'failed', error.message));
@@ -91,21 +108,49 @@ export class ForgeSwarm {
       mkdirSync(artifactRoot, { recursive: true });
       run.agents.set(id, { id, role: 'worker', title, parent: 'lead', harness: 'forge' });
       sw.emit({ kind: 'agent.start', runId: run.id, id, role: 'worker', title, parent: 'lead' });
-      sw.emit({ kind: 'agent.assign', runId: run.id, agentId: id, harness: 'forge', account: 'ForgeKernel', attempt: 0 });
       const log = (logKind, text) => sw.emit({ kind: 'agent.log', runId: run.id, agentId: id, logKind, text });
-      const env = { ...overrides, FORGEKERNEL_RUNS_DIR: artifactRoot };
-      const created = await this.command(['new', task], { cwd, env, signal: run.abort.signal, log });
-      if (!created.ok) { sw.emit({ kind: 'agent.end', runId: run.id, agentId: id, ok: false, error: created.error }); return { id, task, error: created.error }; }
-      const dirs = readdirSync(artifactRoot, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(join(artifactRoot, d.name, 'run.json')));
-      if (dirs.length !== 1) { const error = 'ForgeKernel did not create exactly one campaign'; sw.emit({ kind: 'agent.end', runId: run.id, agentId: id, ok: false, error }); return { id, task, error }; }
-      const campaign = join(artifactRoot, dirs[0].name);
-      log('sys', `Campaign: ${campaign}`);
-      const result = await this.command(['run', campaign], { cwd, env, signal: run.abort.signal, log });
-      const reportFile = join(campaign, 'report.md');
-      const report = existsSync(reportFile) ? readFileSync(reportFile, 'utf8') : '';
-      sw.emit({ kind: 'agent.output', runId: run.id, agentId: id, text: report.slice(0, 20000) });
-      sw.emit({ kind: 'agent.end', runId: run.id, agentId: id, ok: result.ok, error: result.error });
-      return { id, task, campaign, ok: result.ok, error: result.error, report };
+      let campaign = null; let lastError = null; const tried = new Set();
+      try { log('sys', 'Preparing kernel runtime and waiting for a Claude account.'); await this.ensureRuntime(); }
+      catch (error) { sw.emit({ kind: 'agent.end', runId: run.id, agentId: id, ok: false, error: error.message }); return { id, task, error: error.message }; }
+      for (let attempt = 0; attempt < 6; attempt++) {
+        let account;
+        try { account = await sw.acquire('claude', run.abort.signal, (message) => log('sys', message), null, tried, true); }
+        catch (error) { lastError = error.message; break; }
+        let success = false;
+        try {
+          account.task = `kernel: ${title}`; sw.pool.refresh(account); sw.pool.publish(account);
+          Object.assign(run.agents.get(id), { account: account.id, harness: 'claude' });
+          sw.emit({ kind: 'agent.assign', runId: run.id, agentId: id, harness: 'claude', account: account.id, attempt });
+          const accountAuth = account.configDir ? { ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', CLAUDE_CODE_OAUTH_TOKEN: '' } : {};
+          const env = { ...accountAuth, ...sw.pool.env(account), ...overrides, FORGEKERNEL_RUNS_DIR: artifactRoot, RATCHET_KERNEL_MODEL: account.model || '' };
+          let result;
+          if (!campaign) {
+            result = await this.command(['new', task], { cwd, env, signal: run.abort.signal, log });
+            if (result.ok) {
+              const dirs = readdirSync(artifactRoot, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(join(artifactRoot, d.name, 'run.json')));
+              if (dirs.length !== 1) result = { ok: false, error: 'ForgeKernel did not create exactly one campaign' };
+              else { campaign = join(artifactRoot, dirs[0].name); log('sys', `Campaign: ${campaign}`); }
+            }
+          }
+          if (campaign && (!result || result.ok)) result = await this.command(['run', campaign], { cwd, env, signal: run.abort.signal, log });
+          const detail = `${result.error || ''}\n${result.output || ''}`;
+          if (!result.ok && !run.abort.signal.aborted && LIMIT_RE.test(detail)) {
+            tried.add(account.id); sw.pool.markLimited(account, parseReset(detail));
+            log('err', `${account.id} reached a usage limit and was moved to Not using. Retrying with another Claude account.`);
+            sw.emit({ kind: 'agent.failover', runId: run.id, agentId: id, from: account.id });
+            lastError = result.error || 'Account usage limit'; continue;
+          }
+          success = result.ok;
+          const reportFile = campaign && join(campaign, 'report.md');
+          const report = reportFile && existsSync(reportFile) ? readFileSync(reportFile, 'utf8') : '';
+          sw.emit({ kind: 'agent.output', runId: run.id, agentId: id, text: report.slice(0, 20000) });
+          sw.emit({ kind: 'agent.end', runId: run.id, agentId: id, ok: result.ok, error: result.error });
+          return { id, task, campaign, ok: result.ok, error: result.error, report };
+        } finally { sw.release(account, success); }
+      }
+      lastError ||= 'No account available for the kernel campaign.';
+      sw.emit({ kind: 'agent.end', runId: run.id, agentId: id, ok: false, error: lastError });
+      return { id, task, campaign, error: lastError };
     }));
     const report = ['# ForgeKernel campaigns', '', ...results.flatMap((r) => [`## ${r.id} · ${r.task}`, `Status: ${r.ok ? 'target reached' : run.abort.signal.aborted ? 'stopped' : 'not completed successfully'}`, ...(r.campaign ? [`Artifacts: ${r.campaign}`] : []), ...(r.error ? [`Error: ${r.error}`] : []), '', r.report || 'No ForgeKernel report was produced.', ''])].join('\n');
     writeFileSync(join(run.root, 'REPORT.md'), report); run.report = report;

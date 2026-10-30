@@ -1,0 +1,30 @@
+ForgeKernel
+Copyright 2026 The ForgeKernel Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The leaderboard evaluator (src/forgekernel/card_template/eval/leaderboard.py) contains
+code adapted from the following projects, both licensed under the Apache License,
+Version 2.0. The adapted parts are the input generators and the reproduction of each
+suite's correctness and timing protocol; they were modified to run inside a ForgeKernel
+task.
+
+--------------------------------------------------------------------------------
+FlashInfer-Bench
+https://github.com/flashinfer-ai/flashinfer-bench (commit 15618a6)
+Adapted from: flashinfer_bench/bench/utils.py, flashinfer_bench/bench/evaluators/default.py
+
+NOTICE file of FlashInfer-Bench:
+
+  FlashInfer-Bench
+
+  Copyright (c) 2025 by FlashInfer-Bench Contributors
+
+--------------------------------------------------------------------------------
+SOL-ExecBench
+https://github.com/NVIDIA/SOL-ExecBench (commit a9fa080)
+Adapted from: src/sol_execbench/core/bench/io.py, src/sol_execbench/core/bench/correctness.py,
+src/sol_execbench/core/bench/timing.py, src/sol_execbench/driver/templates/eval_driver.py
+
+  SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0

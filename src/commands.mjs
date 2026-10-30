@@ -15,7 +15,7 @@ const HELP = [
   ['follow <instruction>', 'queue an instruction for the active swarm’s next agent turns'],
   ['cd [path]', 'change the current workspace directory'],
   ['<command>', 'run a non-interactive shell command in the workspace'],
-  ['forge use <checkout> | check <task> | start <task> [task...]', 'configure and launch ForgeKernel campaigns'],
+  ['forge setup | status | check <task> | start <task> [task...]', 'run kernel optimization campaigns'],
   ['opt init|start [goal]|apply', 'evolutionary optimise loop on ratchet.json (archive, ratchet, holdout)'],
   ['dir [path|n]', 'show/change workspace (also: click the path in the header); dir recent, dir mk <path>'],
   ['accounts', 'list the account pool'],
@@ -53,9 +53,9 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
       let tasks = args; let device = null;
       if (args[0] === '--device') { device = args[1]; tasks = args.slice(2); if (!device) return say('usage: --device modal:<GPU> | local:<index>', 'err'); }
       if (!forge) return say('ForgeKernel integration is unavailable.', 'err');
-      if (sub === 'status' && !tasks.length) return say(`ForgeKernel executable: ${forge.binary}${forge.checkout ? ` · checkout: ${forge.checkout}` : ''}`, 'dim');
-      if (sub === 'use' && tasks.length) { try { const result = await forge.use(tasks.join(' '), settings.dir); return say(`Using ${result.version} from ${result.checkout}`, 'ok'); } catch (e) { return say(e.message, 'err'); } }
-      if (!tasks.length || !['start', 'check'].includes(sub)) return say('usage: forge use <checkout> | status | check <task> | start <task> [task...]', 'err');
+      if (sub === 'status' && !tasks.length) return say(`Ratchet kernel engine: ${forge.root} · runtime: ${forge.binary}`, 'dim');
+      if (sub === 'setup' && !tasks.length) { try { await forge.ensureRuntime(); return say('Ratchet kernel runtime is ready.', 'ok'); } catch (e) { return say(e.message, 'err'); } }
+      if (!tasks.length || !['start', 'check'].includes(sub)) return say('usage: forge setup | status | check <task> | start <task> [task...]', 'err');
       if (sub === 'check') { try { const result = await forge.check(tasks.join(' '), settings.dir, device); return say(result.ok ? result.output : result.error, result.ok ? 'ok' : 'err'); } catch (e) { return say(e.message, 'err'); } }
       try { const run = forge.start(tasks, device); return say(`ForgeKernel swarm ${run.id} launched with ${tasks.length} campaign(s).`, 'ok'); } catch (e) { return say(e.message, 'err'); }
     }

@@ -232,23 +232,21 @@ In priority order. Each item is scoped so it can be built and checked on its own
 
 [karpathy/autoresearch](https://github.com/karpathy/autoresearch) for the keep-or-discard experiment loop, [AlphaEvolve](https://arxiv.org/abs/2506.13131) for the program database and model ensemble, and [KernelEvolve](https://arxiv.org/abs/2512.23236) for graph search with retrieval-augmented context.
 
-## ForgeKernel campaigns
+## Kernel optimization campaigns
 
-Ratchet can wrap independent ForgeKernel task directories in a single swarm. Select your ForgeKernel checkout (which must have its own `.venv/bin/forge` installation):
+Ratchet includes its adapted ForgeKernel engine in `src/forgekernel` with its task templates, prompts, skills, and hardware knowledge base. Its code and resources are licensed under Apache 2.0; see `LICENSE-forgekernel` and `NOTICE-forgekernel`.
+
+Use **Kernel** in the Agents panel to select a built-in task or enter your own task directory. You can also use the Terminal:
 
 ```
-forge use /path/to/ForgeKernel
+forge setup
 forge status
-forge check /path/to/ForgeKernel/tasks/my-task
-forge start /path/to/ForgeKernel/tasks/my-task
-forge check --device modal:H200 /path/to/ForgeKernel/tasks/my-task
-forge start --device local:0 /path/to/ForgeKernel/tasks/my-task
+forge check builtin:muse_prefill_boundary
+forge start builtin:muse_prefill_boundary
+forge check --device modal:H200 /path/to/task
+forge start --device local:0 /path/to/task
 ```
 
-You can also pass the checkout's `src/forgekernel` directory to `forge use`. Ratchet saves the selected checkout locally in `~/.ratchet/forge.json`. `RATCHET_FORGE_BIN` overrides the saved selection; without either, Ratchet uses `~/.ratchet/forgekernel-venv/bin/forge`.
+The first check or campaign automatically prepares a Python virtual environment in `~/.ratchet/kernel-venv` and installs the Modal client. Python 3.11+ and the Claude CLI are required. Machine-specific Forge settings and credentials may be placed in `~/.ratchet/forge.env` using the format in `local.env.example`; the process environment takes precedence. Select **Use configured device**, a Modal GPU type, or a local CUDA device for each launch. Task directories specify architecture, shapes, reference, evaluator, and budgets. Match the task architecture to the selected GPU; a dry run checks configuration but does not validate GPU availability.
 
-Use the **Kernel** button in the Agents panel to choose task directories and GPU delivery. The default is the checkout configuration; select a Modal GPU type or local CUDA device to override it for one campaign. The terminal supports `--device modal:<type>` and `--device local:<index>` after `check` or `start`.
-
-`forge check` runs ForgeKernel's dry run. `forge start` accepts multiple space-separated task directories and launches one independent campaign for each. Output appears in the graph and Activity; artifacts and reports are saved under the Ratchet run's `forge/` directory. Each ForgeKernel checkout supplies its own GPU delivery, model, and provider configuration. Ratchet's account pool and model settings do not control ForgeKernel's internal agents.
-
-An adapted checkout can use Modal H200 when its ForgeKernel configuration supports it; the upstream checkout does not provide that delivery mode. ForgeKernel's local GPU-job lock coordinates its own jobs, but cross-host GPU isolation and remote-job cancellation have not been verified. `stop all` terminates the local ForgeKernel campaign processes; check your provider for any jobs they started remotely. The ForgeKernel wrapper has been tested with simulated campaigns and a real dry run, not an end-to-end GPU campaign.
+Each task runs an independent ForgeKernel campaign with an eligible Claude account reserved from Ratchet's account pool. Its selected model overrides the task's teacher and student models; leave the account model empty to use the task configuration. Campaign output appears in the graph and Activity, with artifacts and reports in the Ratchet run's `forge/` directory. ForgeKernel's GPU-job lock coordinates its own jobs. Remote-job cancellation, cross-host benchmark isolation, and end-to-end GPU execution have not yet been verified. `stop all` terminates local campaign processes; check your provider for any remote jobs they started.

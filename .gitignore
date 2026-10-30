@@ -1,3 +1,13 @@
 node_modules/
 .ratchet/
 *.log
+
+# Local kernel configuration and Python artifacts
+/local.env
+.venv/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+/operators/
+.artifacts/

@@ -1,0 +1,19 @@
+"""Shared test fixtures.
+
+Truncation free-retry (loop/driver.TRUNCATION_*) is disabled by default in
+tests: the fixture tests script exact agent-reply sequences against
+FakeBackend, and many deliberately include short, traceless turns (a stalling
+teacher, a yielded write-up) whose PRODUCTION treatment is now "retry after a
+60-600s backoff without charging the round". Under test that treatment would
+consume the next scripted reply and sleep for real minutes. Setting the backoff
+tuple empty turns the retry loop off entirely; tests that exercise the retry
+behavior itself opt back in with an explicit zero-sleep tuple.
+"""
+import pytest
+
+import forgekernel.loop.driver as _driver
+
+
+@pytest.fixture(autouse=True)
+def _no_truncation_retries(monkeypatch):
+    monkeypatch.setattr(_driver, "TRUNCATION_BACKOFF_S", ())

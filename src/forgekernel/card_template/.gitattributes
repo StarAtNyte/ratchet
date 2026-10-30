@@ -1,0 +1,26 @@
+# What `git archive` must NOT put into the tree a GPU job runs.
+#
+# Every job extracts `git archive <branch>` fresh (on this machine, or copied to the
+# ssh host). Every path below is read by the LOCAL side only -- the student agent and
+# the meta agent read the workspace directory directly, and the driver reads the
+# archives -- so shipping them only makes every job copy files it never opens.
+#
+# Do NOT add `notes/` here: probe rounds are submitted as `python3 notes/<probe>.py`
+# and really do run on the node.
+#
+# Anything an operator card adds that only the local side reads (extra reference
+# write-ups, captured profiles, digests) belongs in this list too -- and an edit
+# to this file only takes effect once it is COMMITTED to the branch being
+# archived: `git archive <tree-ish>` reads attributes from that tree, not from the
+# working directory (that would need --worktree-attributes, which the submitter
+# deliberately does not pass -- the payload for a given commit stays reproducible).
+
+milestone.md            export-ignore
+README.md               export-ignore
+window.toml             export-ignore
+agent/                  export-ignore
+student/                export-ignore
+meta_status.jsonl       export-ignore
+arch_baseline.json      export-ignore
+ref_baseline.json       export-ignore
+best_confirmation.json  export-ignore

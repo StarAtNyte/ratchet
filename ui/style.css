@@ -519,3 +519,5 @@ header button.ws { margin-right: auto; max-width: min(42vw, 480px); padding: 6px
 #forgeTasks { resize: vertical; }
 #forgeDeviceField:not([hidden]) { display: grid; gap: var(--space-xs); }
 #forgeResult { margin: 0; max-height: 180px; }
+.forge-task-picker { display: flex; gap: var(--space-xs); }
+.forge-task-picker select { flex: 1; min-width: 0; padding: var(--space-xs) var(--space-sm); color: var(--color-ink); background: var(--color-paper-3); border: 1px solid var(--color-rule); border-radius: var(--radius-pill); }

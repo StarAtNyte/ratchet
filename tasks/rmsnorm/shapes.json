@@ -1,0 +1,4 @@
+[
+  {"name": "prefill", "axes": {"m": 8192, "n": 4096}},
+  {"name": "decode", "axes": {"m": 64, "n": 4096}}
+]

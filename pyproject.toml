@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forgekernel"
+version = "0.1.0"
+description = "A self-evolving GPU kernel agent that learns the architecture of an open-source or closed-source reference kernel and keeps optimizing past it."
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+readme = "README.md"
+
+[project.optional-dependencies]
+modal = ["modal>=1.6,<2"]
+
+[project.scripts]
+forge = "forgekernel.__main__:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

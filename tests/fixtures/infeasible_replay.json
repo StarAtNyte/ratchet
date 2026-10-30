@@ -1,0 +1,32 @@
+{
+  "_note": "Real reachability lines of nine INFEASIBLE stop requests (single-workload sealed-reference runs), with the driver's stop line (milestone target_ms, device window) and the outcomes of the meta records before the request. Five BLOCKED lines clear target x 1.20; four OPEN lines are stop requests on a failed disproof.",
+  "cases": [
+    {"id": "blocked-a", "expect": "accept", "target_ms": 0.0013,
+     "prior": ["AUTHORED", "AUDIT_CLEAN"],
+     "reachability": "floor_opt=0.00176 ms vs target=0.0013 ms (×1.20 = 0.00156 ms) -> BLOCKED"},
+    {"id": "blocked-b", "expect": "accept", "target_ms": 0.0012,
+     "prior": ["AUTHORED", "UNPRICED_REOPEN"],
+     "reachability": "floor_opt=1.53 µs (0.00153 ms, empty launch floor F0_16 [MEASURED]) vs target=0.0012 ms → BLOCKED (0.00153 > 0.0012×1.20 = 0.00144)"},
+    {"id": "blocked-c", "expect": "accept", "target_ms": 0.0014,
+     "prior": ["AUTHORED", "AUDIT_CLEAN"],
+     "reachability": "floor_opt=0.00206 ms（construction and term-by-term arithmetic in evidence）vs target=0.0014 ms -> BLOCKED"},
+    {"id": "blocked-d", "expect": "accept", "target_ms": 0.0020,
+     "prior": ["AUTHORED", "AUDIT_CLEAN"],
+     "reachability": "floor_opt=0.00272 ms (the copy floor, which bounds every architecture; built in evidence) vs target=0.00208 ms (same-job ref 2.976 µs ÷ 1.4321) -> BLOCKED"},
+    {"id": "blocked-e", "expect": "accept", "target_ms": 0.0054,
+     "prior": ["AUTHORED", "AUDIT_CLEAN"],
+     "reachability": "floor_opt=0.0068 ms (arithmetic in evidence ①) vs target=0.0054 ms (×1.20 = 0.00648 ms) -> BLOCKED"},
+    {"id": "open-a", "expect": "refuse", "target_ms": 0.0279,
+     "prior": ["AUTHORED", "KB_CERTIFIED", "KEEP_PATCH"],
+     "reachability": "floor_opt=0.0217 ms (term-by-term arithmetic in evidence) vs target=0.0279 ms (×1.20 = 0.0335 ms) -> OPEN"},
+    {"id": "open-b", "expect": "refuse", "target_ms": 0.0308,
+     "prior": ["AUTHORED", "AUDIT_CLEAN", "PENDING", "REVERT_PATCH", "REVERT_PATCH"],
+     "reachability": "floor_opt=0.0273 ms (construction in evidence) vs target=0.0308 ms (×1.20 = 0.0370) -> OPEN"},
+    {"id": "open-c", "expect": "refuse", "target_ms": 0.0104,
+     "prior": ["AUTHORED", "KB_CERTIFIED", "KEEP_PATCH"],
+     "reachability": "floor_opt=0.0072 ms vs target=0.0104 ms -> OPEN"},
+    {"id": "open-d", "expect": "refuse", "target_ms": 0.0107,
+     "prior": ["AUTHORED", "AUDIT_CLEAN", "REVERT_PATCH"],
+     "reachability": "floor_opt=0.0046 ms vs target=0.0107 ms -> OPEN"}
+  ]
+}

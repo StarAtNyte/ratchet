@@ -1,0 +1,31 @@
+# What to optimize. Everything here is the problem; nothing on the command line changes it.
+# A key left out takes its value from global_config/ (models.toml: [agent]; loop.toml:
+# [target], [budget]); write only what changes.
+
+[task]
+language = "cutedsl"                 # cutedsl | cuda
+arch     = "sm100"                   # the target GPU (sm90, sm100, ...)
+
+# The reference: the implementation to learn from and to beat. Leave the table out and a
+# /goal session writes one first.
+# [reference]
+# run    = "reference/run.py:run"    # the callable timed beside the kernel; same signature
+# source = "reference"               # the teacher may read this; omit it for a black box
+# blackbox = true                    # withhold the source anyway
+# deny   = []                        # extra paths no agent may read
+# deny_urls    = []                  # its repositories on the web ("github.com/org/RefLib")
+# deny_modules = []                  # its package installed on the GPU machine: no probe
+#                                    # there and no kernel may name it
+
+# [target]
+# ratio  = 1.2                       # x the reference's speed (or ms = <absolute target>)
+# timing = "device"                  # device | e2e
+
+# [agent]                            # both agents; [agent.teacher] / [agent.student] for one
+# model  = "claude-opus-5-5"
+# effort = "high"
+
+# [budget]
+# hours           = 4                # the loop's wall clock: reconnaissance, distillation, student rounds
+# max_meta        = 3                # teacher rounds that revise the milestone
+# reference_hours = 8                # writing a reference when there is none

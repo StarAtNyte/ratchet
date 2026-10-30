@@ -1,0 +1,11 @@
+# Where a run's tokens go. One table per provider; `native` is not listed because it
+# declares nothing -- it means the agent CLI's own login state and environment decide
+# (`claude` logged in, or ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN in local.env).
+# `wire` is the protocol the provider's endpoint speaks and must match the agent CLI's
+# (`anthropic` for claude). `key_env` names the variable the key is read from (local.env or
+# the environment); the key itself never goes in a file under version control.
+#
+# [my-gateway]
+# base_url = "https://gateway.example.com/anthropic"
+# wire     = "anthropic"
+# key_env  = "MY_GATEWAY_API_KEY"

@@ -1,0 +1,10 @@
+# The bottom layer of every task's [target] and [budget]. task.toml writes only the keys it
+# changes; a task that sets [target] ms instead of ratio replaces the ratio below.
+[target]
+ratio  = 1.2                # x the reference's speed
+timing = "device"           # device | e2e
+
+[budget]
+hours           = 4         # the loop's wall clock: reconnaissance, distillation and the student's rounds
+max_meta        = 3         # teacher rounds that revise the milestone
+reference_hours = 8         # writing a reference when the task has none

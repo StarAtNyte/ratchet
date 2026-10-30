@@ -1,0 +1,19 @@
+# Operator repo gitignore (independent of the main ForgeKernel repo).
+# The credentialed submit URL must never be committed.
+*.local.toml
+
+# Python / tooling cruft
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
+
+# Student-loop scratch (probes / profiler dumps); keep status + digest tracked.
+student/notes/
+ncu/
+*.ncu-rep
+
+# GPU jobs: each job's log and verdict (forgekernel.submit.jobs); local-only by design.
+.jobs/
+# Local delivery: the tree a run extracts and executes (forgekernel.submit.direct).
+.exec/

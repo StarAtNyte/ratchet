@@ -34,7 +34,7 @@ function say(text, cls = '') { const transcript = $('#terminalTranscript'); stic
 const CATALOG = [
   ['run', '<task>', 'launch a research swarm'],
   ['follow', '<instruction>', 'queue instructions for the active swarm'],
-  ['forge', 'use | status | check | start', 'configure and launch ForgeKernel campaigns'],
+  ['forge', 'setup | status | check | start', 'run kernel optimization campaigns'],
   ['opt', 'init | start [goal] | apply', 'evolutionary optimise loop'],
   ['resume', '<run>', 're-run an interrupted research run'],
   ['stop', '[run|all]', 'stop a run'],
@@ -76,7 +76,7 @@ function argChoices(cmd, sub) {
   if (cmd === 'account') return sub === undefined ? ['add', 'login', 'probe', 'enable', 'disable', 'rm'] : sub === 'add' ? (S.harnesses ?? []) : accts;
   if (cmd === 'mode') return ['yolo', 'auto'];
   if (cmd === 'set') return sub === undefined ? ['slots', 'workers', 'timeout', 'rounds'] : [];
-  if (cmd === 'forge') return sub === undefined ? ['use', 'status', 'check', 'start'] : [];
+  if (cmd === 'forge') return sub === undefined ? ['setup', 'status', 'check', 'start'] : [];
   if (cmd === 'opt') return sub === undefined ? ['init', 'start', 'apply'] : [];
   if (cmd === 'dir') return sub === undefined ? ['recent', 'mk', ...(S.settings.recent ?? [])] : [];
   return [];
@@ -924,7 +924,16 @@ function refreshDrawer() {
 }
 
 // ---------- ForgeKernel campaign launcher ----------
-function openForgeModal() { $('#forgeResult').hidden = true; $('#forgeModal').hidden = false; $('#forgeTasks').focus(); }
+async function openForgeModal() {
+  $('#forgeResult').hidden = true; $('#forgeModal').hidden = false; $('#forgeTasks').focus();
+  try {
+    const response = await fetch('/api/forge/tasks', { headers: { 'x-ratchet-token': token } });
+    if (!response.ok) return;
+    const data = await response.json(); const select = $('#forgeBuiltin'); select.replaceChildren(new Option('Select a task', ''));
+    for (const task of data.tasks) select.add(new Option(task.name, task.value));
+  } catch { /* Manual task paths remain available. */ }
+}
+$('#forgeAddTask').onclick = () => { const value = $('#forgeBuiltin').value; if (!value) return; const field = $('#forgeTasks'); const lines = field.value.split('\n').map((x) => x.trim()).filter(Boolean); if (!lines.includes(value)) lines.push(value); field.value = lines.join('\n'); field.focus(); };
 function closeForgeModal() { $('#forgeModal').hidden = true; }
 $('#forgeClose').onclick = closeForgeModal;
 $('#forgeModal').addEventListener('mousedown', (e) => { if (e.target.id === 'forgeModal') closeForgeModal(); });

@@ -1,0 +1,15 @@
+# rmsnorm -- an example task: fuse a PyTorch RMSNorm (nine kernel launches a call) into one
+# CuTe DSL kernel on a Blackwell GPU. `forge new tasks/rmsnorm`, then `forge run` the run it
+# creates. Everything not written here comes from global_config/.
+
+[task]
+language = "cutedsl"
+arch     = "sm100"                   # sm90 for Hopper
+
+[reference]
+run    = "reference/run.py:run"      # the callable timed beside the kernel
+source = "reference"                 # the teacher may read it (source mode)
+
+[budget]
+hours    = 2
+max_meta = 1

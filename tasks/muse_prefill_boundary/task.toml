@@ -1,0 +1,24 @@
+[task]
+language = "cuda"
+arch = "sm90"
+
+[reference]
+run = "reference/run.py:run"
+source = "reference"
+
+[target]
+ratio = 1.05
+timing = "device"
+
+[agent.teacher]
+model = "claude-sonnet-4-6"
+effort = "high"
+timeout_s = 900
+
+[agent.student]
+model = "claude-sonnet-4-6"
+timeout_s = 900
+
+[budget]
+hours = 0.5
+max_meta = 1
