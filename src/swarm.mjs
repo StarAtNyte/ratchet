@@ -193,6 +193,7 @@ export class Swarm {
     const cache = new Map(Object.entries(results));
     this.runs.delete(id);
     const run = this.newRun(old.task, 'research', { id, root: old.root, cache, results });
+    try { run.followups = readFileSync(join(old.root, 'instructions.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line).text); } catch { run.followups = []; }
     this.drive(run).catch((e) => this.end(run, 'failed', e.message));
     return { run, restored: cache.size };
   }
@@ -200,12 +201,14 @@ export class Swarm {
   /** Start a research run. Rounds chain until the user stops them or the round limit is reached. */
   start(task, chain = { round: 1, stopped: false, prev: null }) {
     const run = this.newRun(chain.round > 1 ? `${task} (round ${chain.round})` : task);
+    run.followups = [...(chain.followups ?? [])];
+    if (run.followups.length) writeFileSync(join(run.root, 'instructions.jsonl'), run.followups.map((text) => JSON.stringify({ t: Date.now(), text })).join('\n') + '\n');
     run.chain = chain; run.baseTask = task;
     this.emit({ kind: 'run.round', runId: run.id, round: chain.round });
     this.drive(run).catch((e) => this.end(run, 'failed', e.message)).finally(() => {
       const limit = this.settings.rounds ?? 0; // 0 = until stopped
       if (chain.stopped || run.status !== 'done' || (limit && chain.round >= limit)) return;
-      setTimeout(() => { if (!chain.stopped) this.start(task, { round: chain.round + 1, stopped: false, prev: { id: run.id, report: run.report } }); chain.stopped = true; }, 5000);
+      setTimeout(() => { if (!chain.stopped) this.start(task, { round: chain.round + 1, stopped: false, prev: { id: run.id, report: run.report }, followups: [...(run.followups ?? [])] }); chain.stopped = true; }, 5000);
     });
     return run;
   }
@@ -229,6 +232,19 @@ export class Swarm {
       if (own) this.end(run, res.ok ? 'done' : 'failed', res.ok ? null : res.error);
     });
     return { runId: run.id, agentId: id };
+  }
+
+  /** Queue user instructions for future agent turns and subsequent rounds. */
+  followup(text, id = null) {
+    const run = id ? this.runs.get(id) : [...this.runs.values()].reverse().find((r) => r.status === 'running' && r.kind === 'research');
+    if (!run || run.status !== 'running' || run.kind !== 'research') throw new Error('No active research run to update.');
+    const instruction = String(text ?? '').trim();
+    if (!instruction) throw new Error('Usage: follow <instruction>');
+    if (instruction.length > 10000) throw new Error('Instruction must be 10,000 characters or fewer.');
+    (run.followups ??= []).push(instruction);
+    appendFileSync(join(run.root, 'instructions.jsonl'), JSON.stringify({ t: Date.now(), text: instruction }) + '\n');
+    this.emit({ kind: 'run.instruction', runId: run.id, text: instruction });
+    return run.id;
   }
 
   stop(id) {
@@ -258,7 +274,7 @@ export class Swarm {
   }
 
   ctx(run) {
-    return `Workspace folder: ${this.settings.dir}\nRun notes folder: ${run.root}\nOverall research task: ${run.task}`;
+    return `Workspace folder: ${this.settings.dir}\nRun notes folder: ${run.root}\nOverall research task: ${run.task}${run.followups?.length ? `\nAdditional user instructions for subsequent work:\n${run.followups.map((text, i) => `${i + 1}. ${text}`).join('\n')}` : ''}`;
   }
 
   async drive(run) {

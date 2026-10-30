@@ -33,6 +33,7 @@ function say(text, cls = '') { stick(termOut, () => { const d = el('div', cls); 
 // command catalogue drives completion and the suggestion list
 const CATALOG = [
   ['run', '<task>', 'launch a research swarm'],
+  ['follow', '<instruction>', 'queue instructions for the active swarm'],
   ['opt', 'init | start [goal] | apply', 'evolutionary optimise loop'],
   ['resume', '<run>', 're-run an interrupted research run'],
   ['stop', '[run|all]', 'stop a run'],

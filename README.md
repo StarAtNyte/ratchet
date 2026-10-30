@@ -175,6 +175,7 @@ Output lives in `<workspace>/.ratchet/runs/<id>/opt/`: `archive.json`, `failures
 | Command | Does |
 | --- | --- |
 | `run <task>` | Launch a research swarm |
+| `follow <instruction>` | Queue instructions for subsequent agent turns and rounds |
 | `opt init \| start [goal] \| apply` | Optimise loop |
 | `dir [path\|n]`, `dir recent`, `dir mk <path>` | Show, change, list recent, or create-and-switch the workspace |
 | `accounts`, `account add\|login\|probe\|rm` | Manage the pool |

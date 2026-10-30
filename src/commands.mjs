@@ -8,10 +8,11 @@ import { HARNESSES, mergeEnv } from './harness.mjs';
 import { TEMPLATE } from './optimizer.mjs';
 import { writeFileSync } from 'node:fs';
 
-export const COMMANDS = ['help', 'run', 'resume', 'opt', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
+export const COMMANDS = ['help', 'run', 'follow', 'resume', 'opt', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
 
 const HELP = [
   ['run <task>', 'launch a research swarm'],
+  ['follow <instruction>', 'queue an instruction for the active swarm’s next agent turns'],
   ['cd [path]', 'change the current workspace directory'],
   ['<command>', 'run a non-interactive shell command in the workspace'],
   ['opt init|start [goal]|apply', 'evolutionary optimise loop on ratchet.json (archive, ratchet, holdout)'],
@@ -144,6 +145,11 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
         return;
       }
       return say('usage: account add|rm|login|probe', 'err');
+    }
+
+    case 'follow': {
+      if (!arg) return say('usage: follow <instruction>', 'err');
+      try { const id = swarm.followup(arg); return say(`Instruction queued for ${id}. New agent turns will receive it; agents already running are not interrupted.`, 'ok'); } catch (e) { return say(e.message, 'err'); }
     }
 
     case 'resume': {

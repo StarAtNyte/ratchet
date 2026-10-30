@@ -119,3 +119,20 @@ test('weekly provider limit and dated time-zone reset are recognized', () => {
   assert.match(message, LIMIT_RE);
   assert.equal(parseReset(message, Date.UTC(2026, 9, 30)), Date.UTC(2026, 10, 1, 2, 0));
 });
+
+test('follow-up instructions are saved and included in future agent context', async () => {
+  const { Swarm } = await import('../src/swarm.mjs');
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'ratchet-follow-'));
+  try {
+    const swarm = new Swarm({ pool: {}, emit: () => {}, settings: { dir: root } });
+    const run = { id: 'r1', kind: 'research', status: 'running', root, task: 'research' };
+    swarm.runs.set(run.id, run);
+    assert.equal(swarm.followup('submit and iterate too'), 'r1');
+    assert.match(swarm.ctx(run), /submit and iterate too/);
+    assert.equal(JSON.parse(readFileSync(join(root, 'instructions.jsonl'), 'utf8')).text, 'submit and iterate too');
+    run.status = 'stopped'; assert.throws(() => swarm.followup('more'), /No active research run/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
