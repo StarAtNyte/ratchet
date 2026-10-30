@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { ENV_KEY } from './harness.mjs';
 
@@ -11,13 +11,25 @@ const which = (bin) => {
   try { return execFileSync('which', [bin], { encoding: 'utf8' }).trim() || null; } catch { return null; }
 };
 
-const fresh = (a) => ({ ...a, status: 'idle', load: 0, limitedUntil: 0, task: null, done: 0, failed: 0, authed: null });
+const fresh = (a) => ({ ...a, enabled: a.enabled !== false, status: 'idle', load: 0, limitedUntil: 0, task: null, done: 0, failed: 0, authed: null, email: null, plan: null });
 
 export function pub(a) {
   return {
-    id: a.id, harness: a.harness, status: a.status, load: a.load, limitedUntil: a.limitedUntil,
-    task: a.task, done: a.done, failed: a.failed, authed: a.authed, configDir: a.configDir,
+    id: a.id, harness: a.harness, enabled: a.enabled !== false, status: a.status, load: a.load, limitedUntil: a.limitedUntil,
+    task: a.task, done: a.done, failed: a.failed, authed: a.authed, checking: !!a.checking, authMessage: a.authMessage ?? null, email: a.email, plan: a.plan, configDir: a.configDir,
   };
+}
+
+// Read only identity claims from the local Codex login; never publish tokens.
+export function codexIdentity(configDir) {
+  try {
+    const auth = JSON.parse(readFileSync(join(configDir || process.env.CODEX_HOME || join(homedir(), '.codex'), 'auth.json'), 'utf8'));
+    const token = auth.tokens?.id_token;
+    if (typeof token !== 'string') return {};
+    const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+    const details = claims['https://api.openai.com/auth'] || {};
+    return { email: typeof claims.email === 'string' ? claims.email : null, plan: typeof details.chatgpt_plan_type === 'string' ? details.chatgpt_plan_type : null };
+  } catch { return {}; }
 }
 
 /** Registry of paid accounts plus their live runtime state. */
@@ -34,29 +46,53 @@ export class AccountPool {
   }
 
   load() {
-    let saved = [];
-    if (existsSync(FILE)) { try { saved = JSON.parse(readFileSync(FILE, 'utf8')); } catch { saved = []; } }
-    if (!saved.length) {
+    let saved;
+    if (existsSync(FILE)) {
+      saved = JSON.parse(readFileSync(FILE, 'utf8'));
+      if (!Array.isArray(saved)) throw new Error(`Invalid account registry: ${FILE}`);
+    } else {
+      saved = [];
       if (which('claude')) saved.push({ id: 'claude-1', harness: 'claude', configDir: null });
       if (which('codex')) saved.push({ id: 'codex-1', harness: 'codex', configDir: null });
       if (which('agy')) saved.push({ id: 'antigravity-1', harness: 'antigravity', configDir: null });
-      writeFileSync(FILE, JSON.stringify(saved, null, 2));
+      this.writeRegistry(saved);
     }
-    this.accounts = saved.map(fresh);
+    this.accounts = saved.map((entry) => { const a = fresh(entry); if (a.harness === 'codex') Object.assign(a, codexIdentity(a.configDir)); return a; });
+  }
+
+  writeRegistry(entries) {
+    const temp = `${FILE}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    writeFileSync(temp, JSON.stringify(entries, null, 2), { mode: 0o600 });
+    renameSync(temp, FILE);
+  }
+
+  // Keep live state for known accounts while importing changes made by another instance.
+  syncRegistry() {
+    if (this.mock || !existsSync(FILE)) return;
+    const saved = JSON.parse(readFileSync(FILE, 'utf8'));
+    if (!Array.isArray(saved)) throw new Error(`Invalid account registry: ${FILE}`);
+    const existing = new Map(this.accounts.map((a) => [a.id, a]));
+    this.accounts = saved.map((entry) => {
+      const a = existing.get(entry.id);
+      if (a && a.harness === entry.harness && a.configDir === entry.configDir) { a.enabled = entry.enabled !== false; return a; }
+      const restored = fresh(entry);
+      if (restored.harness === 'codex') Object.assign(restored, codexIdentity(restored.configDir));
+      return restored;
+    });
   }
 
   save() {
     if (this.mock) return;
-    const slim = this.accounts.map(({ id, harness, configDir }) => ({ id, harness, configDir }));
-    writeFileSync(FILE, JSON.stringify(slim, null, 2));
+    this.writeRegistry(this.accounts.map(({ id, harness, configDir, enabled }) => ({ id, harness, configDir, enabled: enabled !== false })));
   }
 
   list() { return this.accounts; }
   get(id) { return this.accounts.find((a) => a.id === id); }
   publish(a) { this.emit({ kind: 'account', account: { ...pub(a), hint: a.configDir ? this.loginHint(a) : '' } }); }
-  publishAll() { this.accounts.forEach((a) => this.publish(a)); }
+  publishAll() { this.syncRegistry(); this.accounts.forEach((a) => this.publish(a)); }
 
   add(harness) {
+    this.syncRegistry();
     let i = this.accounts.filter((a) => a.harness === harness).length + 1;
     while (this.get(`${harness}-${i}`)) i++;
     const id = `${harness}-${i}`;
@@ -71,11 +107,22 @@ export class AccountPool {
   }
 
   remove(id) {
+    this.syncRegistry();
     const i = this.accounts.findIndex((a) => a.id === id);
     if (i < 0) return false;
     this.accounts.splice(i, 1);
     this.save();
     this.emit({ kind: 'account.remove', id });
+    return true;
+  }
+
+  setEnabled(id, enabled) {
+    this.syncRegistry();
+    const account = this.get(id);
+    if (!account) return false;
+    account.enabled = enabled;
+    this.save();
+    this.publish(account);
     return true;
   }
 

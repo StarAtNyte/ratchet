@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { dirname, join, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { AccountPool, HOME } from './accounts.mjs';
+import { AccountPool, HOME, codexIdentity } from './accounts.mjs';
 import { Swarm } from './swarm.mjs';
 import { Optimizer } from './optimizer.mjs';
 import { HARNESSES, mergeEnv } from './harness.mjs';
@@ -59,6 +59,12 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
   const restored = swarm.restore();
   const say = (text, cls = '') => emit({ kind: 'term', text, cls });
 
+  // Check non-interactive provider status on startup; never send a test prompt automatically.
+  if (!mock) for (const a of pool.list().filter((x) => ['claude', 'codex'].includes(x.harness))) {
+    void execCommand(`account probe ${a.id}`, { say: () => {}, swarm, pool, settings, optimizer, remember });
+  }
+
+  const terminalCommands = new Map();
   const logins = new Map();
   const startLogin = (a) => {
     logins.get(a.id)?.kill();
@@ -77,8 +83,9 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
     p.on('error', (e) => emit({ kind: 'login', id: a.id, text: `could not start ${def[0]}: ${e.message}`, done: true, ok: false }));
     p.on('close', (code) => {
       logins.delete(a.id);
-      a.authed = code === 0; pool.publish(a);
+      a.authed = code === 0; if (a.harness === 'codex' && a.authed) Object.assign(a, codexIdentity(a.configDir)); pool.publish(a);
       emit({ kind: 'login', id: a.id, text: code === 0 ? 'signed in' : `sign-in ended (exit ${code})`, done: true, ok: code === 0 });
+      if (code === 0 && ['claude', 'codex'].includes(a.harness)) void execCommand(`account probe ${a.id}`, { say: () => {}, swarm, pool, settings, optimizer, remember });
     });
   };
 
@@ -206,17 +213,28 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       return void res.writeHead(204).end();
     }
 
-    if (url.pathname === '/api/cmd' && req.method === 'POST') {
+    if ((url.pathname === '/api/cmd' || url.pathname === '/api/cmd/interrupt') && req.method === 'POST') {
       if (!authed(req, url)) return void res.writeHead(401).end();
       let body = '';
       for await (const c of req) { body += c; if (body.length > 1e5) return void res.writeHead(413).end(); }
-      let line = '';
-      try { line = String(JSON.parse(body).line ?? ''); } catch { return void res.writeHead(400).end(); }
-      res.writeHead(204).end();
+      let request;
+      try { request = JSON.parse(body); } catch { return void res.writeHead(400).end(); }
+      const clientId = typeof request.clientId === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(request.clientId) ? request.clientId : null;
+      if (url.pathname === '/api/cmd/interrupt') {
+        if (!clientId) return void res.writeHead(400).end();
+        const controller = terminalCommands.get(clientId);
+        if (controller) controller.abort();
+        return void res.writeHead(controller ? 204 : 404).end();
+      }
+      const line = String(request.line ?? '');
+      if (clientId && terminalCommands.has(clientId)) return void res.writeHead(409).end('A command is already running');
+      const controller = new AbortController();
+      if (clientId) terminalCommands.set(clientId, controller);
       say(`❯ ${line}`, 'echo');
-      try { await execCommand(line, { say, swarm, pool, settings, optimizer, remember }); }
+      try { await execCommand(line, { say, swarm, pool, settings, optimizer, remember, signal: controller.signal }); }
       catch (e) { say(`error: ${e.message}`, 'err'); }
-      return;
+      finally { if (clientId && terminalCommands.get(clientId) === controller) terminalCommands.delete(clientId); }
+      return void res.writeHead(204).end();
     }
 
     if (VENDOR[url.pathname]) {
@@ -242,7 +260,7 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
 
   say(`workspace ${dir}`, 'dim');
   if (restored) say(`loaded ${restored} earlier run(s) from this workspace; interrupted ones can be resumed`, 'dim');
-  say('type a research task and press enter, or "help"', 'dim');
+  say('type run <task> to start research, or help for commands', 'dim');
   const shutdown = () => {
     swarm.stop('all'); server.close();
     for (const sh of shells.values()) { try { sh.p.kill('SIGTERM'); } catch { /* gone */ } }

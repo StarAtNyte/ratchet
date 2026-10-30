@@ -1,5 +1,7 @@
 const $ = (s) => document.querySelector(s);
 const token = new URLSearchParams(location.search).get('t') ?? '';
+const terminalClientId = sessionStorage.getItem('ratchet.terminal.client') || crypto.randomUUID();
+sessionStorage.setItem('ratchet.terminal.client', terminalClientId);
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const COLORS = {};
 const loadColors = () => Object.assign(COLORS, { claude: css('--harness-claude'), codex: css('--harness-codex'), antigravity: css('--harness-antigravity'), lead: css('--color-ink'), bad: css('--color-bad'), none: css('--harness-other'), ok: css('--color-ok'), warn: css('--color-accent'), accent: css('--color-accent'), paper: css('--color-paper-3'), panel: css('--color-paper-2'), rule: css('--color-rule'), muted: css('--color-muted'), ink2: css('--color-ink-2') });
@@ -13,8 +15,11 @@ const S = {
   logins: {},
   runs: new Map(),
   current: null,
-  tab: 'feed',
+  tab: 'agents',
   focus: null,
+  feedTools: false,
+  lastSeq: 0,
+  clearSeq: Number(sessionStorage.getItem(`ratchet.clear.${token}`)) || 0,
 };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -27,18 +32,19 @@ function say(text, cls = '') { stick(termOut, () => { const d = el('div', cls); 
 
 // command catalogue drives completion and the suggestion list
 const CATALOG = [
-  ['run', '<task>', 'launch a research swarm (or just type the task)'],
+  ['run', '<task>', 'launch a research swarm'],
   ['opt', 'init | start [goal] | apply', 'evolutionary optimise loop'],
   ['resume', '<run>', 're-run an interrupted research run'],
   ['stop', '[run|all]', 'stop a run'],
   ['runs', '', 'list runs'],
   ['report', '[run]', 'print a run report'],
   ['accounts', '', 'list the account pool'],
-  ['account', 'add | login | probe | rm', 'manage accounts'],
+  ['account', 'add | login | probe | enable | disable | rm', 'manage accounts'],
+  ['cd', '<path>', 'change the workspace directory'],
   ['dir', '<path> | recent | mk <path>', 'change the workspace'],
   ['mode', 'yolo | auto', 'agent permission level'],
   ['set', 'slots | workers | timeout | rounds <n>', 'tune the swarm'],
-  ['clear', '', 'clear the console'],
+  ['clear', '', 'clear the dashboard view'],
   ['help', '', 'all commands'],
 ];
 const hist = JSON.parse(localStorage.getItem('ratchet.hist') || '[]'); let hi = hist.length;
@@ -50,7 +56,7 @@ function argChoices(cmd, sub) {
   const accts = [...S.accounts.keys()];
   if (['stop', 'report'].includes(cmd)) return ['all', ...runs];
   if (cmd === 'resume') return [...S.runs.values()].filter((r) => r.status !== 'running' && r.status !== 'done').map((r) => r.id).reverse();
-  if (cmd === 'account') return sub === undefined ? ['add', 'login', 'probe', 'rm'] : sub === 'add' ? (S.harnesses ?? []) : accts;
+  if (cmd === 'account') return sub === undefined ? ['add', 'login', 'probe', 'enable', 'disable', 'rm'] : sub === 'add' ? (S.harnesses ?? []) : accts;
   if (cmd === 'mode') return ['yolo', 'auto'];
   if (cmd === 'set') return sub === undefined ? ['slots', 'workers', 'timeout', 'rounds'] : [];
   if (cmd === 'opt') return sub === undefined ? ['init', 'start', 'apply'] : [];
@@ -98,8 +104,12 @@ async function submitLine(line) {
   if (hist[hist.length - 1] !== line) hist.push(line);
   while (hist.length > 300) hist.shift();
   localStorage.setItem('ratchet.hist', JSON.stringify(hist)); hi = hist.length;
-  if (line === 'clear') { termOut.innerHTML = ''; return; }
-  await fetch('/api/cmd', { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ line }) });
+  if (line === 'clear') { clearOutput(); return; }
+  try {
+    const response = await fetch('/api/cmd', { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ line, clientId: terminalClientId }) });
+    if (response.status === 409) say('A command is already running. Press Ctrl+C to stop it.', 'warn');
+    else if (!response.ok) say('Could not run the command.', 'err');
+  } catch { say('Could not reach the server.', 'err'); }
 }
 $('#termForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -109,7 +119,11 @@ $('#termForm').addEventListener('submit', async (e) => {
 });
 termIn.addEventListener('keydown', (e) => {
   const open = sug.items.length > 0 && !$('#suggest').hidden;
-  if (e.key === 'Tab') {
+  if (e.key.toLowerCase() === 'c' && e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (termIn.selectionStart !== termIn.selectionEnd || window.getSelection()?.toString()) return;
+    e.preventDefault(); termIn.value = ''; sug.items = []; renderSuggest();
+    fetch('/api/cmd/interrupt', { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ clientId: terminalClientId }) }).then((r) => { if (r.status === 204) say('^C · command interrupted', 'warn'); else if (r.status !== 404) say('Could not interrupt the command.', 'err'); }).catch(() => say('Could not reach the server.', 'err'));
+  } else if (e.key === 'Tab') {
     e.preventDefault();
     if (!sug.items.length) return;
     const it = sug.items[sug.sel >= 0 ? sug.sel : 0];
@@ -121,13 +135,13 @@ termIn.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowUp') { e.preventDefault(); if (hi > 0) termIn.value = hist[--hi]; sug.items = []; renderSuggest(); }
   else if (e.key === 'ArrowDown') { e.preventDefault(); termIn.value = hi < hist.length - 1 ? hist[++hi] : (hi = hist.length, ''); }
   else if (e.key === 'Escape') { sug.items = []; renderSuggest(); }
-  else if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); termOut.innerHTML = ''; }
+  else if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); clearOutput(); }
   else if (e.key === 'u' && e.ctrlKey) { e.preventDefault(); termIn.value = ''; refreshSuggest(); }
   else if (e.key === 'Enter' && open && sug.sel >= 0) { e.preventDefault(); termIn.value = sug.items[sug.sel].value; refreshSuggest(); }
 });
 document.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.target !== document.body) return;
-  if (TT.tab === 'shell' && xt.term) xt.term.focus(); else termIn.focus();
+  if (TT.tab === 'console') termIn.focus();
 });
 
 // quick chips
@@ -137,54 +151,25 @@ document.addEventListener('keydown', (e) => {
 
 // ---------- terminal tabs, shell, split, expand ----------
 const TT = { tab: 'console' };
-const xt = { term: null, fit: null, id: sessionStorage.getItem('ratchet.shell') || null, es: null, out: '', timer: 0, dead: false };
-const toRgb = (c) => { const cv2 = document.createElement('canvas'); cv2.width = cv2.height = 1; const x = cv2.getContext('2d'); x.fillStyle = c; x.fillRect(0, 0, 1, 1); const [r, g, b] = x.getImageData(0, 0, 1, 1).data; return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`; };
-const shellPost = (op, body) => fetch(`/api/shell/${op}`, { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-async function shellConnect(fresh) {
-  if (!xt.term) {
-    if (!window.Terminal) { $('#xterm').textContent = 'The shell needs /vendor/xterm.js. Reinstall Ratchet.'; return; }
-    xt.term = new window.Terminal({
-      fontFamily: css('--font-outlier') || 'monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: true, allowProposedApi: false, scrollback: 5000,
-      theme: { background: toRgb(css('--color-paper-3')), foreground: toRgb(css('--color-ink')), cursor: toRgb(css('--color-accent')), selectionBackground: toRgb(css('--color-accent-soft')), black: toRgb(css('--color-paper-2')), brightBlack: toRgb(css('--color-muted')), red: toRgb(css('--color-bad')), green: toRgb(css('--color-ok')), yellow: toRgb(css('--color-accent')), blue: toRgb(css('--color-cool')), cyan: toRgb(css('--harness-codex')), magenta: toRgb(css('--harness-antigravity')), white: toRgb(css('--color-ink-2')), brightWhite: toRgb(css('--color-ink')) },
-    });
-    xt.fit = new window.FitAddon.FitAddon();
-    xt.term.loadAddon(xt.fit);
-    xt.term.open($('#xterm'));
-    xt.term.onData((d) => {
-      if (xt.dead) { if (d === '\r') shellConnect(true); return; }
-      xt.out += d; clearTimeout(xt.timer); xt.timer = setTimeout(() => { const data = xt.out; xt.out = ''; shellPost('input', { id: xt.id, data }); }, 6);
-    });
-    let rt = 0;
-    new ResizeObserver(() => { if (TT.tab !== 'shell') return; clearTimeout(rt); rt = setTimeout(() => { try { xt.fit.fit(); } catch { /* hidden */ } if (xt.id && !xt.dead) shellPost('resize', { id: xt.id, cols: xt.term.cols, rows: xt.term.rows }); }, 80); }).observe($('#shellView'));
-  }
-  try { xt.fit.fit(); } catch { /* hidden */ }
-  if (fresh) { xt.id = null; xt.term.reset(); }
-  const r = await shellPost('start', { id: xt.id, cols: xt.term.cols, rows: xt.term.rows });
-  if (!r.ok) { xt.term.write('\r\ncould not start a shell\r\n'); return; }
-  const j = await r.json();
-  if (j.id !== xt.id) xt.term.reset();
-  xt.id = j.id; xt.dead = false; sessionStorage.setItem('ratchet.shell', j.id);
-  xt.es?.close();
-  xt.es = new EventSource(`/api/shell/stream?id=${encodeURIComponent(j.id)}&t=${encodeURIComponent(token)}`);
-  xt.es.onmessage = (m) => {
-    const msg = JSON.parse(m.data);
-    if (msg.d) xt.term.write(Uint8Array.from(atob(msg.d), (ch) => ch.charCodeAt(0)));
-    if (msg.exit) { xt.dead = true; xt.es.close(); xt.term.write(`\r\n\x1b[2m${msg.error ?? 'shell exited'}. Press Enter for a new shell.\x1b[0m\r\n`); }
-  };
-  xt.term.focus();
-}
 function setTermTab(tab) {
   TT.tab = tab;
   document.querySelectorAll('.ttabs button').forEach((b) => b.classList.toggle('on', b.dataset.tt === tab));
   $('#consoleView').classList.toggle('on', tab === 'console');
-  $('#shellView').classList.toggle('on', tab === 'shell');
-  $('#tNewShell').hidden = tab !== 'shell';
-  if (tab === 'shell') shellConnect(false); else termIn.focus();
+  $('#activityView').classList.toggle('on', tab === 'activity');
+  document.querySelectorAll('.ttabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tt === tab))); 
+  if (tab === 'console') termIn.focus();
 }
 document.querySelectorAll('.ttabs button').forEach((b) => { b.onclick = () => setTermTab(b.dataset.tt); });
-$('#tNewShell').onclick = () => { if (xt.id) shellPost('kill', { id: xt.id }); shellConnect(true); };
-$('#tClear').onclick = () => { if (TT.tab === 'shell') xt.term?.clear(); else termOut.innerHTML = ''; };
-$('#tMax').onclick = () => { const m = $('main'); m.classList.toggle('termMax'); $('#tMax').textContent = m.classList.contains('termMax') ? 'restore' : 'expand'; setTimeout(() => { try { xt.fit?.fit(); } catch { /* hidden */ } }, 50); };
+function clearOutput() {
+  S.clearSeq = S.lastSeq; sessionStorage.setItem(`ratchet.clear.${token}`, String(S.clearSeq));
+  termOut.replaceChildren();
+  for (const r of S.runs.values()) { r.feed = []; r.cleared = true; }
+  S.current = null; S.focus = null; $('#focus').hidden = true;
+  if (drawer) $('#dclose').click();
+  resetPanes(); renderRunbar(); renderStats(); renderAgents(); renderOverview();
+}
+$('#tClear').onclick = clearOutput;
+$('#tMax').onclick = () => { const m = $('main'); m.classList.toggle('termMax'); $('#tMax').textContent = m.classList.contains('termMax') ? 'restore' : 'expand';  };
 (() => {
   const split = $('#split'); const mainEl = $('main');
   const saved = Number(localStorage.getItem('ratchet.split')); if (saved > 0.15 && saved < 0.85) mainEl.style.setProperty('--gfrac', saved);
@@ -192,16 +177,16 @@ $('#tMax').onclick = () => { const m = $('main'); m.classList.toggle('termMax');
   split.addEventListener('pointerdown', (e) => {
     split.setPointerCapture(e.pointerId);
     const move = (ev) => { const r = mainEl.getBoundingClientRect(); setFrac((ev.clientY - r.top) / r.height); };
-    const up = () => { split.removeEventListener('pointermove', move); split.removeEventListener('pointerup', up); try { xt.fit?.fit(); } catch { /* hidden */ } };
+    const up = () => { split.removeEventListener('pointermove', move); split.removeEventListener('pointerup', up);  };
     split.addEventListener('pointermove', move); split.addEventListener('pointerup', up);
   });
   split.addEventListener('keydown', (e) => { const cur = Number(getComputedStyle(mainEl).getPropertyValue('--gfrac')) || 0.6; if (e.key === 'ArrowUp') setFrac(cur - 0.05); if (e.key === 'ArrowDown') setFrac(cur + 0.05); });
 })();
 
 // ---------- tabs ----------
-document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
+document.querySelectorAll('#side nav button').forEach((b) => b.addEventListener('click', () => {
   S.tab = b.dataset.tab;
-  document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === b));
+  document.querySelectorAll('#side nav button').forEach((x) => x.classList.toggle('on', x === b));
   document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === S.tab));
 }));
 
@@ -216,10 +201,12 @@ function harnessOf(a) { return a.role === 'lead' ? 'lead' : (a.harness ?? 'none'
 
 // ---------- event reducer ----------
 function apply(ev) {
+  S.lastSeq = Math.max(S.lastSeq, ev.seq || 0);
+  const showOutput = !ev.seq || ev.seq > S.clearSeq;
   switch (ev.kind) {
     case 'hello': S.settings = ev.settings; S.commands = ev.commands; S.harnesses = ev.harnesses ?? []; renderHeader(); break;
     case 'settings': S.settings = ev.settings; renderHeader(); break;
-    case 'term': say(ev.text, ev.cls); break;
+    case 'term': if (showOutput) say(ev.text, ev.cls); break;
     case 'account': S.accounts.set(ev.account.id, ev.account); renderAccounts(); break;
     case 'login': {
       const L = (S.logins[ev.id] = ev.reset ? { text: '', url: null, done: false } : (S.logins[ev.id] ?? { text: '', url: null, done: false }));
@@ -229,27 +216,29 @@ function apply(ev) {
       break;
     }
     case 'account.remove': S.accounts.delete(ev.id); renderAccounts(); break;
-    case 'run.start': { const r = run(ev.runId); r.task = ev.task; r.startedAt = ev.t; S.current = ev.runId; S.focus = null; resetPanes(); renderRunbar(); break; }
+    case 'run.start': { const r = run(ev.runId); r.task = ev.task; r.startedAt = ev.t; r.cleared = !showOutput; if (showOutput) { S.current = ev.runId; S.focus = null; resetPanes(); } renderRunbar(); break; }
     case 'agent.start': { const r = run(ev.runId); r.agents.set(ev.id, { id: ev.id, role: ev.role, title: ev.title, parent: ev.parent, harness: null, account: null, status: 'queued', born: ev.t, prompt: ev.prompt, failovers: 0, attempts: [] }); renderRunbar(); break; }
-    case 'agent.assign': { const a = run(ev.runId).agents.get(ev.agentId); if (a) { Object.assign(a, { harness: ev.harness, account: ev.account, status: 'running', pulse: ev.t, startedAt: a.startedAt ?? ev.t }); (a.attempts ??= []).push(ev.account); } break; }
-    case 'agent.failover': { const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.status = 'queued'; a.flash = ev.t; a.failovers = (a.failovers ?? 0) + 1; } break; }
+    case 'agent.assign': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} started on ${ev.account} (${ev.harness})${ev.attempt ? ` · retry ${ev.attempt}` : ''}`, 'dim'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { Object.assign(a, { harness: ev.harness, account: ev.account, status: 'running', pulse: ev.t, startedAt: a.startedAt ?? ev.t }); (a.attempts ??= []).push(ev.account); } break; }
+    case 'agent.failover': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} is switching accounts after ${ev.from}`, 'warn'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.status = 'queued'; a.flash = ev.t; a.failovers = (a.failovers ?? 0) + 1; } break; }
     case 'agent.end': {
       const a = run(ev.runId).agents.get(ev.agentId);
       if (a) { a.status = ev.ok ? 'done' : 'failed'; a.error = ev.error; a.endedAt = ev.t; }
+      if (showOutput) say(`[${ev.runId}] ${ev.agentId} ${ev.ok ? 'finished' : `failed: ${ev.error || 'unknown error'}`}`, ev.ok ? 'ok' : 'err');
       if (ev.ok) clickGear();
       break;
     }
     case 'agent.log': {
       const r = run(ev.runId); const a = r.agents.get(ev.agentId);
-      r.feed.push({ id: ev.agentId, kind: ev.logKind, text: ev.text, harness: a ? harnessOf(a) : 'none' });
+      if (!showOutput) break;
+      r.feed.push({ id: ev.agentId, kind: ev.logKind, text: ev.text, t: ev.t, harness: a ? harnessOf(a) : 'none' });
       if (r.feed.length > 1500) r.feed.shift();
-      if (ev.runId === S.current && (!S.focus || S.focus === ev.agentId)) addFeed(r.feed.at(-1));
+      if (ev.runId === S.current && (!S.focus || S.focus === ev.agentId) && (S.feedTools || ev.logKind !== 'tool')) addFeed(r.feed.at(-1));
       break;
     }
     case 'cand.result': {
       const a = run(ev.runId).agents.get(ev.agentId);
       if (a) Object.assign(a, { score: ev.score, ok: ev.ok, champion: ev.champion || a.champion, idea: ev.idea, family: ev.family });
-      if (ev.champion) say(`★ ${ev.agentId} new champion ${Number(ev.score).toFixed(4)} · ${ev.idea}`, 'ok');
+      if (showOutput && ev.champion) say(`★ ${ev.agentId} new champion ${Number(ev.score).toFixed(4)} · ${ev.idea}`, 'ok');
       break;
     }
     case 'agent.output': { const a = run(ev.runId).agents.get(ev.agentId); if (a) a.output = ev.text; break; }
@@ -260,12 +249,12 @@ function apply(ev) {
       break;
     }
     case 'run.report': { const r = run(ev.runId); r.report = ev.markdown; if (ev.runId === S.current) renderReport(); break; }
-    case 'run.end': { const r = run(ev.runId); r.status = ev.status; r.endedAt = ev.t; if (ev.note) say(`run ${ev.runId} ${ev.status}: ${ev.note}`, 'err'); else say(`run ${ev.runId} ${ev.status}`, ev.status === 'done' ? 'ok' : 'warn'); renderRunbar(); break; }
+    case 'run.end': { const r = run(ev.runId); r.status = ev.status; r.endedAt = ev.t; if (showOutput && ev.note) say(`run ${ev.runId} ${ev.status}: ${ev.note}`, 'err'); else if (showOutput) say(`run ${ev.runId} ${ev.status}`, ev.status === 'done' ? 'ok' : 'warn'); renderRunbar(); break; }
   }
   renderStats(); scheduleLists(); if (ev.runId === S.current || ev.kind === 'account') renderOverview();
 }
 
-function resetPanes() { $('#feed').innerHTML = ''; renderClaims(); renderReport(); $('#focus').hidden = true; }
+function resetPanes() { renderFeed(); renderClaims(); renderReport(); $('#focus').hidden = true; }
 
 // ---------- renderers ----------
 function renderHeader() {
@@ -289,9 +278,10 @@ function renderStats() {
 function renderRunbar() {
   const bar = $('#runbar'); bar.innerHTML = '';
   for (const r of S.runs.values()) {
+    if (r.cleared) continue;
     const b = el('button', `${r.id === S.current ? 'on' : ''} ${r.status === 'running' ? 'running' : ''}`);
     b.textContent = `${r.id} · ${r.task}`;
-    b.onclick = () => { S.current = r.id; S.focus = null; resetPanes(); r.feed.slice(-400).forEach(addFeed); renderRunbar(); renderStats(); };
+    b.onclick = () => { S.current = r.id; S.focus = null; resetPanes(); renderFeed(); renderRunbar(); renderStats(); };
     bar.append(b);
     if (r.status === 'running' && r.id === S.current) { const x = el('button', 'stopRun'); x.type = 'button'; x.textContent = 'stop run'; x.onclick = () => sendCmd(`stop ${r.id}`); bar.append(x); }
     if (r.status === 'interrupted' && r.id === S.current) { const x = el('button', 'stopRun'); x.type = 'button'; x.textContent = 'resume'; x.onclick = () => sendCmd(`resume ${r.id}`); bar.append(x); }
@@ -301,18 +291,39 @@ function renderRunbar() {
 function renderAccounts() {
   const list = $('#accList');
   const accs = [...S.accounts.values()].sort((a, b) => a.id.localeCompare(b.id));
-  const ready = accs.filter((a) => a.status !== 'limited').length;
+  const ready = accs.filter((a) => a.enabled !== false && a.authed === true && !a.checking && a.status !== 'limited').length;
   $('#poolSum').textContent = `${ready}/${accs.length} ready`;
   list.innerHTML = '';
+  const groups = {};
+  for (const [enabled, title] of [[true, 'Using'], [false, 'Not using']]) {
+    const group = el('section', 'account-group'); group.dataset.enabled = String(enabled);
+    const count = accs.filter((a) => (a.enabled !== false) === enabled).length;
+    group.innerHTML = `<div class="account-group-head"><span>${title}</span><span>${count}</span></div><div class="account-drop" data-enabled="${enabled}"></div>`;
+    const drop = group.querySelector('.account-drop');
+    if (!count) drop.append(el('div', 'account-drop-empty', enabled ? 'Move accounts here to use them' : 'Drag accounts here to exclude them'));
+    group.addEventListener('dragover', (event) => { event.preventDefault(); group.classList.add('drag-over'); event.dataTransfer.dropEffect = 'move'; });
+    group.addEventListener('dragleave', (event) => { if (!group.contains(event.relatedTarget)) group.classList.remove('drag-over'); });
+    group.addEventListener('drop', (event) => { event.preventDefault(); group.classList.remove('drag-over'); const id = event.dataTransfer.getData('text/plain'); if (S.accounts.has(id)) sendCmd(`account ${enabled ? 'enable' : 'disable'} ${id}`); });
+    groups[String(enabled)] = drop; list.append(group);
+  }
   for (const a of accs) {
     const pips = Array.from({ length: S.settings.slots ?? 2 }, (_, i) => `<i class="${i < a.load ? 'on' : ''}"></i>`).join('');
     const d = el('div', `acc ${a.harness} ${a.status}`, `
-      <div class="top"><span class="id">${esc(a.id)}</span><span class="led"></span></div>
-      <div class="task">${esc(a.task ?? (a.status === 'limited' ? 'rate limited' : 'idle'))}</div>
+      <div class="top"><span class="id">${esc(a.id)}</span><span class="account-state ${a.authed === true ? 'connected' : a.authed === false ? 'disconnected' : 'unknown'}">${a.checking ? 'Checking…' : a.authed === true ? 'Signed in' : a.authed === false ? 'Sign in needed' : 'Not checked'}</span></div>
+      <div class="account-email">${esc(a.email ?? (a.checking ? 'Checking account details…' : a.authMessage ?? (a.authed === true ? 'Email not provided by provider' : a.authed === false ? 'Sign in to use this account' : 'Sign-in status unavailable')))}</div>
+      <div class="task">${esc(a.task ?? (a.enabled === false ? 'Excluded from new assignments' : a.status === 'limited' ? 'rate limited' : 'idle'))}</div>
       <div class="row"><span class="pips">${pips}</span><span>${a.done}✓ ${a.failed ? a.failed + '✗' : ''}</span>
         <span class="${a.status === 'limited' ? 'cd' : a.authed === false ? 'auth-no' : ''}" data-until="${a.limitedUntil || 0}">${a.authed === false ? 'not logged in' : ''}</span></div>`);
+    d.draggable = true;
+    d.setAttribute('role', 'button'); d.tabIndex = 0; d.setAttribute('aria-label', `${a.id}, open account details`);
     d.onclick = () => openAccount(a.id);
-    list.append(d);
+    d.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openAccount(a.id); } };
+    d.ondragstart = (event) => { event.dataTransfer.setData('text/plain', a.id); event.dataTransfer.effectAllowed = 'move'; d.classList.add('dragging'); };
+    d.ondragend = () => d.classList.remove('dragging');
+    const move = el('button', 'account-move'); move.type = 'button'; move.textContent = a.enabled === false ? 'Use account' : 'Stop using';
+    move.setAttribute('aria-label', `${a.enabled === false ? 'Use' : 'Stop using'} ${a.id}`);
+    move.onclick = (event) => { event.stopPropagation(); sendCmd(`account ${a.enabled === false ? 'enable' : 'disable'} ${a.id}`); };
+    d.append(move); groups[String(a.enabled !== false)].append(d);
   }
   tickCountdowns();
 }
@@ -328,22 +339,30 @@ function tickCountdowns() {
 
 function addFeed(f) {
   const box = $('#feed');
+  const placeholder = box.querySelector('.activity-empty'); if (placeholder) placeholder.remove();
   stick(box, () => {
-    const row = el('div', `ln ${f.kind}`);
-    const who = el('span', `who ${f.harness}`); who.textContent = f.id;
-    who.onclick = () => openAgent(f.id);
-    const tx = el('span', 'tx'); tx.textContent = f.text;
-    row.append(who, tx); box.append(row);
+    const row = el('div', `activity-entry ${f.kind}`);
+    const head = el('div', 'activity-head');
+    const who = el('button', `activity-agent ${f.harness}`); who.type = 'button'; who.textContent = f.id; who.onclick = () => openAgent(f.id);
+    const type = el('span', 'activity-kind'); type.textContent = ({ tool: 'Tool call', err: 'Error', sys: 'Status', text: 'Update' })[f.kind] || 'Update';
+    const time = el('time', 'activity-time'); if (f.t) { time.dateTime = new Date(f.t).toISOString(); time.textContent = new Date(f.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    head.append(who, type, time);
+    const tx = el('div', 'activity-text'); tx.textContent = f.text;
+    row.append(head, tx); box.append(row);
     while (box.childElementCount > 500) box.firstChild.remove();
   });
 }
-
+function renderFeed() {
+  const box = $('#feed'); box.replaceChildren();
+  const r = cur(); const entries = (r?.feed ?? []).filter((f) => (!S.focus || f.id === S.focus) && (S.feedTools || f.kind !== 'tool')).slice(-400);
+  if (!entries.length) { const empty = el('div', 'activity-empty'); empty.textContent = S.focus ? 'No updates for this agent yet.' : 'Agent updates will appear here as work progresses.'; box.append(empty); }
+  else entries.forEach(addFeed);
+}
+$('#feedDetail').onclick = () => { S.feedTools = !S.feedTools; $('#feedDetail').textContent = S.feedTools ? 'Hide tool calls' : 'Show tool calls'; $('#feedDetail').setAttribute('aria-pressed', String(S.feedTools)); renderFeed(); };
 function focusAgent(id) {
   const r = cur(); if (!r) return;
-  S.focus = S.focus === id ? null : id;
-  $('#feed').innerHTML = '';
-  r.feed.filter((f) => !S.focus || f.id === S.focus).slice(-400).forEach(addFeed);
-  const f = $('#focus'); f.hidden = !S.focus; f.textContent = S.focus ? `filtering: ${S.focus} · click to clear` : '';
+  S.focus = S.focus === id ? null : id; renderFeed();
+  const f = $('#focus'); f.hidden = !S.focus; f.textContent = S.focus ? `Showing ${S.focus} · click to show all` : '';
   f.onclick = () => focusAgent(S.focus);
 }
 
@@ -388,7 +407,7 @@ function clickGear() { gearDeg += 30; $('#gearRot').style.transform = `rotate(${
 const cv = $('#graph'); const ctx = cv.getContext('2d');
 let W = 0; let H = 0; const nodes = new Map(); let hover = null;
 const view = { k: 1, x: 0, y: 0, auto: true };
-const G = { layout: localStorage.getItem('ratchet.layout') || 'radial' };
+const G = { layout: localStorage.getItem('ratchet.layout') || 'tree' };
 function resize() { const r = cv.getBoundingClientRect(); const d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d; W = r.width; H = r.height; }
 new ResizeObserver(resize).observe(cv); resize();
 
@@ -405,10 +424,10 @@ function targets(r) {
     let row = 0;
     const walk = (id, depth) => {
       const ks = (kids.get(id) ?? []);
-      if (!ks.length) { out.set(id, { x: depth * 230, y: row++ * 58 }); return; }
+      if (!ks.length) { out.set(id, { x: depth * 280, y: row++ * 84 }); return; }
       ks.forEach((k) => walk(k.id, depth + 1));
       const ys = ks.map((k) => out.get(k.id).y);
-      out.set(id, { x: depth * 230, y: (Math.min(...ys) + Math.max(...ys)) / 2 });
+      out.set(id, { x: depth * 280, y: (Math.min(...ys) + Math.max(...ys)) / 2 });
     };
     walk('lead', 0);
     return out;
@@ -430,8 +449,8 @@ function targets(r) {
 function bbox(tg) {
   let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
   for (const p of tg.values()) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
-  const padR = G.layout === 'tree' ? 200 : 70;
-  return { x0: x0 - 70, y0: y0 - 60, x1: x1 + padR, y1: y1 + 70 };
+  const padR = G.layout === 'tree' ? 116 : 70;
+  return { x0: x0 - (G.layout === 'tree' ? 116 : 70), y0: y0 - 60, x1: x1 + padR, y1: y1 + 70 };
 }
 function fitTo(b, snap) {
   const ov = $('#overview'); const cvTop = cv.getBoundingClientRect().top;
@@ -462,6 +481,7 @@ function frame(t) {
     [110, 220, 330].forEach((rr) => { ctx.beginPath(); ctx.arc(lead.x, lead.y, rr, 0, 7); ctx.stroke(); });
     for (let i = 0; i < 72; i++) { const an = (i / 72) * Math.PI * 2; const r0 = 330; const r1 = r0 + (i % 6 === 0 ? 10 : 4); ctx.beginPath(); ctx.moveTo(lead.x + Math.cos(an) * r0, lead.y + Math.sin(an) * r0); ctx.lineTo(lead.x + Math.cos(an) * r1, lead.y + Math.sin(an) * r1); ctx.stroke(); }
   }
+  if (G.layout === 'radial') {
   ctx.strokeStyle = tint(COLORS.accent, 22); ctx.beginPath();
   const teeth = 28; const rot = t / 60000;
   for (let i = 0; i < teeth; i++) {
@@ -471,6 +491,7 @@ function frame(t) {
     ctx.lineTo(lead.x + Math.cos(a1) * ro, lead.y + Math.sin(a1) * ro); ctx.lineTo(lead.x + Math.cos(a1) * ri, lead.y + Math.sin(a1) * ri); ctx.lineTo(lead.x + Math.cos(a2) * ri, lead.y + Math.sin(a2) * ri);
   }
   ctx.closePath(); ctx.stroke();
+  }
   if (!r) return;
 
   for (const a of r.agents.values()) {
@@ -490,8 +511,8 @@ function frame(t) {
     const col = COLORS[harnessOf(a)] ?? COLORS.none;
     ctx.strokeStyle = a.status === 'failed' ? tint(COLORS.bad, 40) : a.status === 'done' ? tint(col, 40) : tint(col, 22);
     ctx.lineWidth = (a.status === 'running' ? 1.6 : 1) / Math.sqrt(view.k);
-    ctx.beginPath(); ctx.moveTo(p.x, p.y);
-    if (G.layout === 'tree') { const mx = (p.x + n.x) / 2; ctx.bezierCurveTo(mx, p.y, mx, n.y, n.x, n.y); }
+    ctx.beginPath(); ctx.moveTo(p.x + (G.layout === 'tree' ? 102 : 0), p.y);
+    if (G.layout === 'tree') { const mx = (p.x + n.x) / 2; ctx.bezierCurveTo(mx, p.y, mx, n.y, n.x - 102, n.y); }
     else { const mx = (n.x + p.x) / 2 + (n.y - p.y) * 0.1; const my = (n.y + p.y) / 2 - (n.x - p.x) * 0.1; ctx.quadraticCurveTo(mx, my, n.x, n.y); }
     ctx.stroke();
     if (a.status === 'running') { ctx.setLineDash([4, 6]); ctx.lineDashOffset = -t / 40; ctx.strokeStyle = col; ctx.stroke(); ctx.setLineDash([]); }
@@ -503,6 +524,28 @@ function frame(t) {
   for (const a of r.agents.values()) {
     const n = N(a.id); if (!n) continue;
     const col = a.status === 'failed' ? COLORS.bad : COLORS[harnessOf(a)] ?? COLORS.none;
+    if (G.layout === 'tree') {
+      const w = 204, h = 60, x = n.x - w / 2, y = n.y - h / 2;
+      const isHovered = mw.x >= x && mw.x <= x + w && mw.y >= y && mw.y <= y + h;
+      if (isHovered) hover = a;
+      ctx.fillStyle = COLORS.panel; ctx.strokeStyle = isHovered ? col : tint(col, 40); ctx.lineWidth = isHovered ? 1.8 : 1;
+      ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x + 14, y + 17, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = COLORS.ink2; ctx.font = '600 11px system-ui, sans-serif';
+      ctx.fillText(a.id === 'lead' ? 'LEAD' : String(a.role || 'agent').toUpperCase(), x + 25, y + 17, 96);
+      ctx.fillStyle = a.status === 'failed' ? COLORS.bad : a.status === 'done' ? COLORS.ok : a.status === 'running' ? COLORS.accent : COLORS.muted;
+      ctx.textAlign = 'right'; ctx.font = '10px system-ui, sans-serif'; ctx.fillText(a.status || 'queued', x + w - 12, y + 17, 68);
+      ctx.textAlign = 'left'; ctx.fillStyle = COLORS.lead; ctx.font = '500 12px system-ui, sans-serif';
+      ctx.fillText(a.title || a.id, x + 12, y + 38, w - 24);
+      ctx.fillStyle = COLORS.muted; ctx.font = '10px system-ui, sans-serif';
+      const meta = [a.account || (a.id === 'lead' ? a.id : 'waiting for account'), a.score != null && Number.isFinite(a.score) ? Number(a.score).toFixed(3) : ''].filter(Boolean).join(' · ');
+      ctx.fillText(meta, x + 12, y + 52, w - 24); ctx.textBaseline = 'alphabetic';
+      if (a.status === 'running' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        ctx.fillStyle = col; ctx.globalAlpha = 0.45 + 0.5 * (0.5 + 0.5 * Math.sin(t / 550)); ctx.beginPath(); ctx.arc(x + 14, y + 17, 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+      }
+      continue;
+    }
     const base = a.role === 'lead' ? 16 : a.role === 'verify' ? 8 : a.role === 'sub' || a.role === 'cand' ? 8 : 11;
     const age = t - (tmp.get(`${r.id}/${a.id}`) ?? (tmp.set(`${r.id}/${a.id}`, t), t));
     const zs = 1 / Math.sqrt(Math.max(view.k, 0.2)); // keep nodes legible when zoomed out
@@ -715,22 +758,49 @@ function renderAgents() {
   $('#agentN').textContent = r ? r.agents.size : 0;
   if (S.tab !== 'agents') return;
   box.innerHTML = '';
-  const add = el('button', 'dact primary addAgent', '+ Add agent'); add.type = 'button'; add.onclick = openAgentModal; box.append(add);
-  if (!r || !r.agents.size) { box.append(el('div', 'muted', 'no agents yet')); return; }
+  const header = el('div', 'agents-heading');
+  const label = el('div', 'agents-heading-copy', `<strong>Run agents</strong><span>Inspect progress and troubleshoot failures</span>`);
+  const add = el('button', 'dact addAgent', '+ Add agent'); add.type = 'button'; add.onclick = openAgentModal; header.append(label, add); box.append(header);
+  if (!r || !r.agents.size) { box.append(el('div', 'agents-empty', 'No agents in this run yet. Start research or add an agent to begin.')); return; }
+  const list = el('div', 'agent-list');
   [...r.agents.values()].forEach((a) => {
     const col = a.status === 'failed' ? COLORS.bad : COLORS[harnessOf(a)] ?? COLORS.none;
-    const row = el('div', 'arow', `<span class="dot" style="background:${col}"></span><span class="m">${esc(a.id)}</span><span class="t">${esc(a.title ?? a.role)}<span class="m"> · ${esc(a.account ?? 'waiting')}</span></span><span class="pill ${a.status}">${a.score != null && Number.isFinite(a.score) ? Number(a.score).toFixed(3) : a.status}</span>`);
-    row.onclick = () => openAgent(a.id);
-    box.append(row);
+    const status = a.status || 'queued';
+    const detail = a.status === 'failed' && a.error ? a.error : a.account ? `${a.account} · ${a.harness || 'assigned'}` : 'Waiting for an account';
+    const row = el('button', 'arow', `<span class="agent-marker" style="background:${col}"></span><span class="agent-main"><span class="agent-title">${esc(a.title ?? a.role ?? a.id)}</span><span class="agent-meta">${esc(a.id)} · ${esc(detail)}</span></span><span class="pill ${esc(status)}">${esc(status)}</span>`);
+    row.type = 'button'; row.setAttribute('aria-label', `${a.title ?? a.id}, ${status}. Open agent details`);
+    row.onclick = () => openAgent(a.id); list.append(row);
   });
+  box.append(list);
 }
-document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', renderAgents));
+document.querySelectorAll('#side nav button').forEach((b) => b.addEventListener('click', renderAgents));
 
 let drawer = null;
-function openAccount(id) { drawer = { type: 'account', id }; $('#drawer').hidden = false; refreshDrawer(); }
-function openAgent(id) { drawer = { type: 'agent', id }; $('#drawer').hidden = false; refreshDrawer(); }
-$('#dclose').onclick = () => { drawer = null; $('#drawer').hidden = true; };
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer && $('#picker').hidden) $('#dclose').click(); });
+let detailReturnFocus = null;
+function showDetails(type, id) {
+  if (!drawer) detailReturnFocus = document.activeElement;
+  drawer = { type, id };
+  const isAccount = type === 'account';
+  $('#drawer').hidden = isAccount;
+  $('#agentDetails').hidden = !isAccount;
+  refreshDrawer();
+  $(isAccount ? '#agentDetailClose' : '#dclose').focus();
+}
+function openAccount(id) { showDetails('account', id); }
+function openAgent(id) { showDetails('agent', id); }
+function closeDetails() { drawer = null; $('#drawer').hidden = true; $('#agentDetails').hidden = true; if (detailReturnFocus?.isConnected) detailReturnFocus.focus(); detailReturnFocus = null; }
+$('#dclose').onclick = closeDetails;
+$('#agentDetailClose').onclick = closeDetails;
+$('#agentDetails').onclick = (e) => { if (e.target === $('#agentDetails')) closeDetails(); };
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && drawer && $('#picker').hidden) { e.preventDefault(); closeDetails(); }
+  if (e.key === 'Tab' && drawer?.type === 'account') {
+    const items = [...$('#agentDetails').querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])')];
+    if (!items.length) return;
+    if (e.shiftKey && document.activeElement === items[0]) { e.preventDefault(); items.at(-1).focus(); }
+    else if (!e.shiftKey && document.activeElement === items.at(-1)) { e.preventDefault(); items[0].focus(); }
+  }
+});
 
 const api2 = (u, b) => fetch(u, { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify(b) });
 const beginLogin = (id) => { S.logins[id] = { text: '', url: null, done: false }; api2('/api/login', { id }); };
@@ -738,10 +808,10 @@ function signInHtml(a) {
   const L = S.logins[a.id];
   const canAuto = a.harness === 'claude' || a.harness === 'codex' || (a.harness === 'antigravity' && !!a.configDir);
   const status = a.authed === true ? '<span class="pill done">signed in</span>' : a.authed === false ? '<span class="pill failed">not signed in</span>' : '<span class="pill">unknown</span>';
-  let h = `<div class="dsec">Sign in ${status}</div>`;
-  if (a.harness === 'antigravity' && !a.configDir) return h + `<div class="muted2">This account has no private folder. It uses whichever Google account is signed in to the Antigravity app on this machine. Add another Antigravity account for a separate Google login.</div><div class="dacts"><button class="dact primary" data-act="probe">check sign-in</button></div>${a.authed == null ? '<div class="muted2" style="margin-top:8px">Checking with a one-line test prompt…</div>' : ''}`;
-  if (!canAuto) return h + `<div class="muted2">Automatic sign-in is not available for ${esc(a.harness)}. Run this in a terminal, then use check sign-in:</div><div class="dpre">${esc(a.hint || 'uses your existing CLI login')}</div><div class="dacts"><button class="dact" data-act="copy">copy command</button><button class="dact" data-act="probe">check sign-in</button></div>`;
-  h += `<div class="dacts"><button class="dact primary" data-act="signin">${L && !L.done ? 'restart sign-in' : 'sign in'}</button>${L?.url ? '<button class="dact primary" data-act="open">open sign-in page</button>' : ''}</div>`;
+  let h = `<div class="dsec">Account access ${status}</div>`;
+  if (a.harness === 'antigravity' && !a.configDir) return h + `<div class="muted2">This account has no private folder. It uses whichever Google account is signed in to the Antigravity app on this machine. Add another Antigravity account for a separate Google login.</div>${a.checking ? '<div class="muted2" style="margin-top:8px">Checking with a one-line test prompt…</div>' : ''}`;
+  if (!canAuto) return h + `<div class="muted2">Automatic sign-in is not available for ${esc(a.harness)}. Run this in a terminal, then use check sign-in:</div><div class="dpre">${esc(a.hint || 'uses your existing CLI login')}</div><div class="dacts"><button class="dact" data-act="copy">copy command</button></div>`;
+  h += `<div class="dacts"><button class="dact primary" data-act="signin">${L && !L.done ? 'Restart sign-in' : a.authed === true ? 'Sign in again' : 'Sign in'}</button>${L?.url ? '<button class="dact primary" data-act="open">open sign-in page</button>' : ''}</div>`;
   if (a.harness === 'claude' && L && !L.done) h += `<div class="muted2" style="margin-top:8px">After approving in the browser, paste the code it shows:</div><div class="codeRow"><input id="loginCode" spellcheck="false" placeholder="paste code"><button class="dact" data-act="send">submit</button></div>`;
   if (a.harness === 'antigravity' && L && !L.done) h += `<div class="muted2" style="margin-top:8px">Open the page and finish the Google sign-in within 60 seconds. If the page shows a code, paste it here:</div><div class="codeRow"><input id="loginCode" spellcheck="false" placeholder="paste code if shown"><button class="dact" data-act="send">submit</button></div>`;
   if (a.harness === 'codex' && L && !L.done) h += `<div class="muted2" style="margin-top:8px">Open the page, then enter the code shown below.</div>`;
@@ -751,21 +821,23 @@ function signInHtml(a) {
 const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
 function refreshDrawer() {
   if (!drawer) return;
-  const body = $('#dbody'); const keep = body.scrollTop; const typed = body.querySelector('#loginCode')?.value; const hadFocus = document.activeElement?.id === 'loginCode';
+  const body = $(drawer.type === 'account' ? '#agentDetailBody' : '#dbody'); const keep = body.scrollTop; const typed = body.querySelector('#loginCode')?.value; const hadFocus = document.activeElement?.id === 'loginCode';
   if (drawer.type === 'account') {
     const a = S.accounts.get(drawer.id);
     if (!a) { $('#dclose').click(); return; }
-    $('#dtitle').textContent = a.id;
+    $('#agentDetailTitle').textContent = a.id;
     const jobs = [];
     for (const r of S.runs.values()) for (const g of r.agents.values()) if (g.account === a.id || g.attempts?.includes(a.id)) jobs.push({ r, g });
     const left = a.limitedUntil && a.limitedUntil > Date.now() ? `${fmtDur(a.limitedUntil - Date.now())} (until ${new Date(a.limitedUntil).toLocaleTimeString()})` : '-';
     body.innerHTML = kv([
-      ['harness', esc(a.harness)], ['status', `<span class="pill ${a.status === 'working' ? 'running' : a.status === 'limited' ? 'failed' : 'done'}">${esc(a.status)}</span>`],
-      ['logged in', a.authed === true ? 'yes' : a.authed === false ? 'no' : 'unknown (run probe)'],
+      ['provider', esc(a.harness)], ['activity', `<span class="pill ${a.status === 'working' ? 'running' : a.status === 'limited' ? 'failed' : 'done'}">${esc(a.status)}</span>`],
+      ['sign-in status', a.checking ? 'Checking…' : a.authed === true ? 'Signed in' : a.authed === false ? 'Not signed in' : esc(a.authMessage ?? 'Not checked')],
+      ['email', esc(a.email ?? (a.checking ? 'Checking…' : a.authed === false ? 'Sign in to see account details' : a.authed === true ? 'Not provided by this provider' : 'Sign-in status not checked'))], ['plan', esc(a.plan ?? (a.authed === true ? 'Not provided by this provider' : 'Unavailable'))],
+      ['provider usage', 'Unavailable from the current integration'],
       ['slots in use', `${a.load} / ${S.settings.slots}`], ['jobs done', a.done], ['jobs failed', a.failed],
       ['limit resets in', esc(left)], ['current task', esc(a.task ?? '-')], ['config folder', esc(a.configDir ?? '(default login)')],
     ]) + signInHtml(a)
-      + `<div class="dacts"><button class="dact" data-act="probe">check login</button><button class="dact" data-act="rm">remove account</button></div>`
+      + `<div class="dacts account-actions"><button class="dact" data-act="probe" ${a.checking ? 'disabled' : ''}>${a.checking ? 'Checking…' : 'Check sign-in'}</button><button class="dact" data-act="rm">Remove account</button></div>`
       + `<div class="dsec">Recent jobs (${jobs.length})</div><div class="dlist">${jobs.slice(-12).reverse().map(({ r, g }, i) => `<div data-job="${r.id}/${g.id}"><span>${esc(r.id)} · ${esc(g.id)} · ${esc(g.title ?? '')}</span><span class="pill ${g.status}">${g.status}</span></div>`).join('') || '<div class="muted2">none yet</div>'}</div>`;
     body.querySelectorAll('[data-act]').forEach((b) => { b.onclick = () => {
       const act = b.dataset.act;
@@ -805,11 +877,11 @@ function refreshDrawer() {
 
 // ---------- add-account wizard: pick a provider, then sign in ----------
 const PROVIDERS = {
-  claude: { name: 'Claude Code', how: 'Claude subscription or Console. Sign in in your browser, then paste the code it shows.', auto: true },
-  codex: { name: 'Codex', how: 'ChatGPT plan. Sign in in your browser with a one-time device code.', auto: true },
-  antigravity: { name: 'Antigravity', how: 'Google account. Sign in in your browser within 60 seconds of starting.', auto: true },
-  gemini: { name: 'Gemini CLI', how: 'Sign in once from a terminal.' },
-  opencode: { name: 'OpenCode', how: 'Sign in once from a terminal.' },
+  claude: { name: 'Claude Code', how: 'Claude subscription or Console account.', auto: true },
+  codex: { name: 'Codex', how: 'ChatGPT account with device sign-in.', auto: true },
+  antigravity: { name: 'Antigravity', how: 'Google account with browser sign-in.', auto: true },
+  gemini: { name: 'Gemini CLI', how: 'Sign in through your terminal.' },
+  opencode: { name: 'OpenCode', how: 'Sign in through your terminal.' },
 };
 const WZ = { step: 'pick', harness: null, id: null };
 const wizOpen = () => !$('#addModal').hidden;
@@ -818,14 +890,17 @@ function renderWizard() {
   const body = $('#addBody'); const typed = body.querySelector('#loginCode')?.value; const hadFocus = document.activeElement?.id === 'loginCode';
   $('#addBack').hidden = WZ.step === 'pick'; $('#addDone').hidden = true;
   if (WZ.step === 'pick') {
-    $('#addTitle').textContent = 'Add account: choose a provider';
-    body.innerHTML = '<div class="providers"></div>';
-    const list = body.firstChild;
+    $('#addTitle').textContent = 'Add an account';
+    const signature = JSON.stringify([S.harnesses, [...S.accounts.values()].map((a) => a.harness)]);
+    if (body.dataset.pickerSignature === signature && body.querySelector('.providers')) return;
+    body.dataset.pickerSignature = signature;
+    body.innerHTML = '<p class="provider-intro">Choose the provider you want to connect. You can add more than one account.</p><div class="provider-list-heading">Available providers</div><div class="providers"></div>';
+    const list = body.querySelector('.providers');
     (S.harnesses?.length ? S.harnesses : Object.keys(PROVIDERS)).forEach((h) => {
       const p = PROVIDERS[h] ?? { name: h, how: 'Custom harness from ~/.ratchet/harnesses.json. Sign in from a terminal.' };
       const have = [...S.accounts.values()].filter((a) => a.harness === h).length;
       const full = p.single && have > 0;
-      const b = el('button', `provider ${h}`, `<b>${esc(p.name)}</b><span>${esc(p.how)}</span><small>${have ? `${have} connected` : 'none connected'}${full ? ', limit reached' : ''}</small>`);
+      const b = el('button', `provider ${h}`, `<span class="provider-dot" aria-hidden="true"></span><span class="provider-copy"><b>${esc(p.name)}</b><span>${esc(p.how)}</span></span><span class="provider-count">${have ? `${have} added` : 'Add'}${full ? ' · limit reached' : ''}</span><span class="provider-arrow" aria-hidden="true">›</span>`);
       b.type = 'button'; b.disabled = full;
       b.onclick = async () => {
         const before = new Set(S.accounts.keys());
@@ -843,6 +918,7 @@ function renderWizard() {
     });
     return;
   }
+  delete body.dataset.pickerSignature;
   const a = S.accounts.get(WZ.id);
   if (!a) { WZ.step = 'pick'; return renderWizard(); }
   const p = PROVIDERS[a.harness] ?? { name: a.harness };
@@ -866,9 +942,7 @@ function bindSignIn(root, a) {
   }; });
 }
 const closeWizard = (keep) => {
-  const a = WZ.id && S.accounts.get(WZ.id);
-  // an account that never signed in is removed on cancel, so the pool holds only working accounts
-  if (!keep && WZ.step === 'signin' && a && a.authed !== true && !(S.logins[a.id]?.ok)) sendCmd(`account rm ${a.id}`);
+  // The account stays in the local registry so sign-in can be completed later.
   Object.assign(WZ, { step: 'pick', harness: null, id: null });
   $('#addModal').hidden = true;
 };
@@ -883,7 +957,7 @@ setInterval(() => { if (drawer && drawer.type === 'agent') refreshDrawer(); }, 2
 const ag = { harness: 'any' };
 function fillAccounts() {
   const sel = $('#agAccount'); sel.innerHTML = '<option value="">any available</option>';
-  [...S.accounts.values()].filter((a) => ag.harness === 'any' || a.harness === ag.harness).sort((x, y) => x.id.localeCompare(y.id))
+  [...S.accounts.values()].filter((a) => a.enabled !== false).filter((a) => ag.harness === 'any' || a.harness === ag.harness).sort((x, y) => x.id.localeCompare(y.id))
     .forEach((a) => { const o = document.createElement('option'); o.value = a.id; o.textContent = `${a.id}${a.status === 'limited' ? ' (limited)' : ''}`; sel.append(o); });
 }
 function openAgentModal() {

@@ -50,3 +50,65 @@ test('runEval parses json and bare-number scores, rejects failures', async () =>
   assert.equal((await runEval('echo \'{"score":1,"ok":false}\'', '.', 10)).ok, false);
   assert.equal((await runEval('exit 3', '.', 10)).ok, false);
 });
+
+test('research starts only with the run command', async () => {
+  const { execCommand } = await import('../src/commands.mjs');
+  const messages = []; const started = [];
+  const ctx = { say: (s) => messages.push(s), pool: { list: () => [{}] }, settings: { dir: process.cwd(), rounds: 1 }, swarm: { start: (task) => { started.push(task); return { id: 'r1' }; } } };
+  await execCommand('printf hello', ctx);
+  assert.deepEqual(started, []);
+  assert.ok(messages.includes('hello'));
+  await execCommand('run investigate a bug', ctx);
+  assert.deepEqual(started, ['investigate a bug']);
+});
+
+
+test('cd changes workspace without launching a run', async () => {
+  const { execCommand } = await import('../src/commands.mjs');
+  const { dirname } = await import('node:path');
+  const settings = { dir: process.cwd(), recent: [] }; const messages = [];
+  const ctx = { settings, say: (s) => messages.push(s), swarm: { emit: () => {}, runs: new Map() } };
+  await execCommand('cd ..', ctx);
+  assert.equal(settings.dir, dirname(process.cwd()));
+  assert.equal(messages.at(-1), settings.dir);
+});
+
+test('accounts survive restarts, multiple instances, and an empty registry', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { execFileSync } = await import('node:child_process');
+  const home = mkdtempSync(join(tmpdir(), 'ratchet-accounts-'));
+  try {
+    const script = `
+      import assert from 'node:assert/strict';
+      import { AccountPool } from './src/accounts.mjs';
+      const a = new AccountPool(() => {}), b = new AccountPool(() => {});
+      const first = a.add('gemini'); const second = b.add('opencode');
+      const restored = new AccountPool(() => {});
+      assert.ok(restored.get(first.id)); assert.ok(restored.get(second.id));
+      restored.setEnabled(first.id, false); const again = new AccountPool(() => {}); assert.equal(again.get(first.id).enabled, false); assert.equal(again.get(second.id).enabled, true);
+      for (const account of [...restored.list()]) restored.remove(account.id);
+      assert.equal(new AccountPool(() => {}).list().length, 0);
+    `;
+    execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), env: { ...process.env, RATCHET_HOME: home } });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+
+test('excluded accounts cannot be assigned, including when pinned', async () => {
+  const { Swarm } = await import('../src/swarm.mjs');
+  const disabled = { id: 'claude-1', harness: 'claude', enabled: false, authed: true, limitedUntil: 0, load: 0 };
+  const pool = { list: () => [disabled], refresh: () => {}, free: () => true };
+  const swarm = new Swarm({ pool, emit: () => {}, settings: { slots: 1 } });
+  await assert.rejects(swarm.acquire('any', new AbortController().signal, () => {}), /no other signed-in account/);
+  await assert.rejects(swarm.acquire('any', new AbortController().signal, () => {}, disabled.id), /not in use/);
+});
+
+test('interrupt stops a running shell command and its child process', async () => {
+  const { execCommand } = await import('../src/commands.mjs');
+  const controller = new AbortController(); const lines = [];
+  const command = execCommand('sleep 30', { say: (s) => lines.push(s), settings: { dir: process.cwd() }, signal: controller.signal });
+  setTimeout(() => controller.abort(), 100);
+  await Promise.race([command, new Promise((_, reject) => setTimeout(() => reject(new Error('interrupt did not stop command')), 3000))]);
+});

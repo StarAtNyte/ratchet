@@ -50,7 +50,7 @@ Run it from anywhere. With no folder it uses the current directory; you can chan
 
 Flags: `--port <n>`, `--mock`, `--no-open`. The page URL carries a random token and the server binds to localhost only.
 
-Type a research task into the terminal at the bottom and press enter. The swarm graph, account pool, live feed, claim ledger and report fill in as it runs. Type `help` for commands.
+Type `run <your task>` into the terminal at the bottom and press enter. The swarm graph, account pool, live feed, claim ledger and report fill in as it runs. Type `help` for commands.
 
 ## Running in the background
 
@@ -72,12 +72,12 @@ After a restart Ratchet reloads the workspace's earlier runs. A run that was cut
 | --- | --- |
 | Account pool (left) | One card per account: status LED, concurrency pips, current task, jobs done/failed, reset countdown when limited. |
 | Swarm graph (centre) | The lead, workers, sub-agents, verifiers and optimiser candidates as a live graph, in a radial or a left-to-right **tree** layout. Scroll to zoom, drag to pan, double-click or **fit** to see everything, click a node for its details. The strip on top shows the run's status, elapsed time, agent counts, claim verdicts, busy accounts and, for optimiser runs, the best score so far. |
-| Terminal (bottom) | **Console**: every action is a command, with suggestions as you type, Tab completion of commands, run ids, account ids and folder paths, history kept across reloads, and quick-command buttons. **Shell**: a real login shell in the workspace (xterm.js over a small Python PTY bridge). Drag the divider to resize, or **expand**. |
-| Live / Claims / Report (right) | Streaming agent activity; the claim ledger with verdicts; the final Markdown report. |
+| Terminal (bottom) | **Terminal**: every action is a command, with suggestions as you type, Tab completion, history and quick-command buttons. The adjacent Activity tab shows agent updates. Drag the divider to resize, or **expand**. |
+| Agents / Claims / Report (right) | Streaming agent activity; the claim ledger with verdicts; the final Markdown report. |
 
 ## Accounts and harnesses
 
-An account is an isolated config folder plus a harness. Connect one from the UI:
+An account is an isolated config folder plus a harness. Ratchet saves the account registry in `~/.ratchet/accounts.json` and isolated provider configuration in `~/.ratchet/accounts/`, so accounts are available across workspaces and restarts. Connect one from the UI:
 
 1. In the **Accounts** panel click **+ Add** and pick a harness.
 2. The account's details open. For Claude and Codex, sign-in starts automatically: click **open sign-in page**, approve in the browser, and for Claude paste the code it shows into the box (Codex shows a device code in the log). The account flips to *signed in*.
@@ -120,7 +120,7 @@ Open the **Agents** tab and click **+ Add agent**: pick `auto`, `claude`, `codex
 ## Research swarm
 
 ```
-run <your task>        # or just type the task
+run <your task>        # launch research
 ```
 
 1. **Plan.** A lead inspects the workspace and splits the task into independent lines of attack, each tagged with a preferred harness. Known dead ends from earlier runs (`.ratchet/memory.jsonl`) are included so it does not repeat them.
@@ -174,14 +174,14 @@ Output lives in `<workspace>/.ratchet/runs/<id>/opt/`: `archive.json`, `failures
 
 | Command | Does |
 | --- | --- |
-| `run <task>` | Launch a research swarm (bare text does the same) |
+| `run <task>` | Launch a research swarm |
 | `opt init \| start [goal] \| apply` | Optimise loop |
 | `dir [path\|n]`, `dir recent`, `dir mk <path>` | Show, change, list recent, or create-and-switch the workspace |
 | `accounts`, `account add\|login\|probe\|rm` | Manage the pool |
 | `runs`, `stop [id\|all]`, `report [id]` | Inspect and control runs |
 | `mode yolo\|auto` | `yolo` (default) = full permissions; `auto` = workspace-write sandbox |
 | `set slots\|workers <n>` | Jobs per account / max lines of attack per run |
-| `clear` | Clear the terminal |
+| `clear` | Clear the dashboard view |
 
 ## Safety
 

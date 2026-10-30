@@ -6,7 +6,6 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ratchet</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%233df5c8' stroke-width='4' stroke-dasharray='5 3'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -47,49 +46,45 @@
       <div class="legend"><span><i class="c-claude"></i>claude</span><span><i class="c-codex"></i>codex</span><span><i class="c-antigravity"></i>antigravity</span><span><i class="c-bad"></i>failed</span></div>
       <div class="empty" id="graphEmpty">
         <div class="big">No active run</div>
-        <div>type a research task below and press enter</div>
+        <div>type run followed by a research task in the console</div>
       </div>
     </section>
     <div class="splitter" id="split" role="separator" aria-orientation="horizontal" aria-label="Resize the graph and terminal" tabindex="0"></div>
     <section id="term">
       <div class="termbar">
         <div class="ttabs" role="tablist">
-          <button type="button" data-tt="console" class="on" role="tab">Console</button>
-          <button type="button" data-tt="shell" role="tab">Shell</button>
+          <button type="button" data-tt="console" class="on" role="tab">Terminal</button>
+          <button type="button" data-tt="activity" role="tab">Activity</button>
         </div>
         <span class="tcwd" id="tcwd"></span>
         <div class="tacts">
-          <button type="button" id="tNewShell" hidden>new shell</button>
-          <button type="button" id="tClear">clear</button>
+          <button type="button" id="tClear" title="Clear dashboard output">Clear output</button>
           <button type="button" id="tMax">expand</button>
         </div>
       </div>
       <div class="tview on" id="consoleView">
-        <div id="termOut" aria-live="polite"></div>
+        <div id="termOut" aria-live="polite" aria-label="Terminal output"></div>
         <div id="suggest" role="listbox" hidden></div>
         <div class="quick" id="quick"></div>
         <form id="termForm" autocomplete="off">
           <span class="prompt">›</span>
-          <input id="termIn" spellcheck="false" autofocus placeholder="describe a research task, or type a command (Tab completes)">
-          <span class="kbd"><kbd>Tab</kbd> complete <kbd>↑</kbd> history</span>
+          <input id="termIn" aria-label="Terminal command" spellcheck="false" autofocus placeholder="Enter a command · run <task> starts research">
+          <span class="kbd"><kbd>Tab</kbd> complete <kbd>↑</kbd> history <kbd>Ctrl C</kbd> interrupt</span>
         </form>
       </div>
-      <div class="tview" id="shellView"><div id="xterm"></div></div>
+      <div class="tview" id="activityView"><div class="activity-tools" id="activityTools"><span>Agent updates</span><button type="button" id="feedDetail" aria-pressed="false">Show tool calls</button></div><div id="feed"></div><div class="focus" id="focus" hidden></div></div>
     </section>
   </main>
 
   <aside id="side">
     <nav>
-      <button data-tab="feed" class="on">Activity</button>
-      <button data-tab="agents">Agents <span id="agentN">0</span></button>
+      <button data-tab="agents" class="on">Agents <span id="agentN">0</span></button>
       <button data-tab="claims">Claims <span id="claimN">0</span></button>
       <button data-tab="report">Report</button>
     </nav>
-    <div class="pane on" id="feed"></div>
-    <div class="pane" id="agents"></div>
+    <div class="pane on" id="agents"></div>
     <div class="pane" id="claims"></div>
     <div class="pane" id="report"><div class="muted">report appears when the swarm finishes</div></div>
-    <div class="focus" id="focus" hidden></div>
   </aside>
 </div>
 <div id="picker" class="modal" hidden>
@@ -121,15 +116,19 @@
   </div>
 </div>
 <div id="addModal" class="modal" hidden>
-  <div class="box">
+  <div class="box add-account-box" role="dialog" aria-modal="true" aria-labelledby="addTitle">
     <h3 id="addTitle">Add account</h3>
     <div id="addBody"></div>
-    <div class="actions"><button id="addBack" type="button" hidden>back</button><span class="grow"></span><button id="addCancel" type="button">cancel</button><button id="addDone" type="button" class="primary" hidden>done</button></div>
+    <div class="actions"><button id="addBack" type="button" hidden>Back</button><span class="grow"></span><button id="addCancel" type="button">Cancel</button><button id="addDone" type="button" class="primary" hidden>Done</button></div>
   </div>
 </div>
-<aside id="drawer" hidden><div class="dhead"><b id="dtitle"></b><button id="dclose" type="button">close</button></div><div id="dbody"></div></aside>
-<script src="/vendor/xterm.js"></script>
-<script src="/vendor/addon-fit.js"></script>
+<div id="agentDetails" class="modal" hidden>
+  <div class="agent-detail-box" role="dialog" aria-modal="true" aria-labelledby="agentDetailTitle">
+    <div class="dhead"><b id="agentDetailTitle"></b><button id="agentDetailClose" type="button" aria-label="Close account details">Close</button></div>
+    <div id="agentDetailBody"></div>
+  </div>
+</div>
+<aside id="drawer" hidden><div class="dhead"><b id="dtitle"></b><button id="dclose" type="button" aria-label="Close details">Close</button></div><div id="dbody"></div></aside>
 <script src="/app.js" type="module"></script>
 </body>
 </html>

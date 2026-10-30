@@ -41,7 +41,8 @@ export class Swarm {
       const all = this.pool.list();
       all.forEach((a) => this.pool.refresh(a));
       // signed-out accounts and accounts that already failed this agent are skipped
-      const eligible = all.filter((a) => (pin ? a.id === pin : a.authed !== false && !exclude.has(a.id)));
+      const eligible = all.filter((a) => a.enabled !== false && (pin ? a.id === pin : a.authed !== false && !exclude.has(a.id)));
+      if (pin && all.some((a) => a.id === pin && a.enabled === false)) throw new Error(`account ${pin} is not in use`);
       if (!pin && !eligible.length) throw new Error('no other signed-in account left to try');
       const usable = eligible.filter((a) => a.limitedUntil <= Date.now());
       if (pin && !all.some((a) => a.id === pin)) throw new Error(`account ${pin} not found`);
@@ -62,7 +63,7 @@ export class Swarm {
 
   /** A harness different from `h` that has accounts, for cross-model checks; 'any' when none. */
   other(h) {
-    const alts = [...new Set(this.pool.list().map((a) => a.harness))].filter((x) => x !== h);
+    const alts = [...new Set(this.pool.list().filter((a) => a.enabled !== false).map((a) => a.harness))].filter((x) => x !== h);
     return alts.length ? alts[Math.floor(Math.random() * alts.length)] : 'any';
   }
 
