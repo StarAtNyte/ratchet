@@ -266,11 +266,7 @@ function renderHeader() {
 
 function renderStats() {
   const r = cur();
-  const run_ = r ? [...r.agents.values()].filter((a) => a.status === 'running').length : 0;
   const cl = r ? [...r.claims.values()] : [];
-  const n = (v) => cl.filter((c) => c.verdict === v).length;
-  $('#stats').innerHTML = [['agents', r ? r.agents.size : 0], ['active', run_], ['claims', cl.length], ['confirmed', n('confirmed')], ['refuted', n('refuted')]]
-    .map(([k, v]) => `<div class="stat"><b>${v}</b><small>${k}</small></div>`).join('');
   $('#claimN').textContent = cl.length;
   $('#graphEmpty').classList.toggle('hide', !!r);
 }
