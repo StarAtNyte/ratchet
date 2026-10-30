@@ -201,6 +201,8 @@ function harnessOf(a) { return a.role === 'lead' ? 'lead' : (a.harness ?? 'none'
 
 // ---------- event reducer ----------
 function apply(ev) {
+  // SSE reconnects replay server history; do not apply the same event twice.
+  if (ev.seq && ev.seq <= S.lastSeq) return;
   S.lastSeq = Math.max(S.lastSeq, ev.seq || 0);
   const showOutput = !ev.seq || ev.seq > S.clearSeq;
   switch (ev.kind) {
@@ -216,14 +218,14 @@ function apply(ev) {
       break;
     }
     case 'account.remove': S.accounts.delete(ev.id); renderAccounts(); break;
-    case 'run.start': { const r = run(ev.runId); r.task = ev.task; r.startedAt = ev.t; r.cleared = !showOutput; if (showOutput) { S.current = ev.runId; S.focus = null; resetPanes(); } renderRunbar(); break; }
+    case 'run.start': { const r = run(ev.runId); r.task = ev.task; r.startedAt = ev.t; r.status = 'running'; r.cleared = !showOutput; if (showOutput && (!ev.restored || !cur() || cur().status !== 'running')) { S.current = ev.runId; S.focus = null; resetPanes(); } renderRunbar(); break; }
     case 'agent.start': { const r = run(ev.runId); r.agents.set(ev.id, { id: ev.id, role: ev.role, title: ev.title, parent: ev.parent, harness: null, account: null, status: 'queued', born: ev.t, prompt: ev.prompt, failovers: 0, attempts: [] }); renderRunbar(); break; }
     case 'agent.assign': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} started on ${ev.account} (${ev.harness})${ev.attempt ? ` · retry ${ev.attempt}` : ''}`, 'dim'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { Object.assign(a, { harness: ev.harness, account: ev.account, status: 'running', pulse: ev.t, startedAt: a.startedAt ?? ev.t }); (a.attempts ??= []).push(ev.account); } break; }
     case 'agent.failover': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} is switching accounts after ${ev.from}`, 'warn'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.status = 'queued'; a.flash = ev.t; a.failovers = (a.failovers ?? 0) + 1; } break; }
     case 'agent.end': {
       const a = run(ev.runId).agents.get(ev.agentId);
-      if (a) { a.status = ev.ok ? 'done' : 'failed'; a.error = ev.error; a.endedAt = ev.t; }
-      if (showOutput) say(`[${ev.runId}] ${ev.agentId} ${ev.ok ? 'finished' : `failed: ${ev.error || 'unknown error'}`}`, ev.ok ? 'ok' : 'err');
+      if (a) { a.status = ev.ok ? 'done' : ev.error === 'stopped' ? 'stopped' : 'failed'; a.error = ev.error; a.endedAt = ev.t; }
+      if (showOutput) say(`[${ev.runId}] ${ev.agentId} ${ev.ok ? 'finished' : ev.error === 'stopped' ? 'stopped' : `failed: ${ev.error || 'unknown error'}`}`, ev.ok ? 'ok' : 'err');
       if (ev.ok) clickGear();
       break;
     }
@@ -654,7 +656,7 @@ function connect() {
   es.onmessage = (m) => apply(JSON.parse(m.data));
   es.onerror = () => { conn.textContent = 'offline'; conn.classList.remove('on'); };
 }
-// replayed history rebuilds state from scratch on reconnect
+// Replayed events rebuild initial state; already applied events are ignored on reconnect.
 connect();
 
 // ---------- workspace picker ----------
