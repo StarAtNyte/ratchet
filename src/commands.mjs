@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { existsSync, statSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { homedir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import { HARNESSES } from './harness.mjs';
 import { TEMPLATE } from './optimizer.mjs';
 import { writeFileSync } from 'node:fs';
@@ -10,7 +12,7 @@ export const COMMANDS = ['help', 'run', 'opt', 'dir', 'accounts', 'account', 'ru
 const HELP = [
   ['run <task>', 'launch a swarm on the task (bare text does the same)'],
   ['opt init|start [goal]|apply', 'evolutionary optimise loop on ratchet.json (archive, ratchet, holdout)'],
-  ['dir [path]', 'show or change the workspace folder'],
+  ['dir [path|n]', 'show/change workspace (also: click the path in the header); dir recent, dir mk <path>'],
   ['accounts', 'list the account pool'],
   ['account add <claude|codex|antigravity>', 'create an isolated account slot and show how to log in'],
   ['account login <id>', 'run the login flow for an account'],
@@ -25,7 +27,7 @@ const HELP = [
 ];
 
 /** Execute one terminal line. `say(text, cls)` writes to the web terminal. */
-export async function execCommand(line, { say, swarm, pool, settings, optimizer }) {
+export async function execCommand(line, { say, swarm, pool, settings, optimizer, remember }) {
   const text = line.trim();
   if (!text) return;
   const [cmd, ...rest] = text.split(/\s+/);
@@ -57,11 +59,17 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer 
     }
 
     case 'dir': {
+      if (rest[0] === 'recent') { settings.recent.forEach((d, i) => say(`  ${i + 1}  ${d}`, 'dim')); return; }
       if (arg) {
-        const p = resolve(settings.dir, arg.replace(/^~(?=\/)/, process.env.HOME));
-        if (!existsSync(p) || !statSync(p).isDirectory()) return say(`not a folder: ${p}`, 'err');
+        const make = rest[0] === 'mk';
+        const raw = make ? rest.slice(1).join(' ') : /^\d$/.test(arg) && settings.recent[Number(arg) - 1] ? settings.recent[Number(arg) - 1] : arg;
+        const p = resolve(settings.dir, raw.replace(/^~(?=$|\/)/, homedir()));
+        if (make) mkdirSync(p, { recursive: true });
+        if (!existsSync(p) || !statSync(p).isDirectory()) return say(`not a folder: ${p}  (dir mk <path> creates it)`, 'err');
         settings.dir = p;
+        remember?.(p);
         swarm.emit({ kind: 'settings', settings: { ...settings } });
+        if ([...swarm.runs.values()].some((r) => r.status === 'running')) say('active runs keep their old folder; new runs use this one', 'warn');
       }
       say(settings.dir, 'ok');
       return;

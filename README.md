@@ -46,6 +46,8 @@ ratchet --mock                  # simulated agents, burns no quota: try the UI f
 ratchet ~/path/to/workspace     # real agents; opens http://127.0.0.1:7777
 ```
 
+Run it from anywhere. With no folder it uses the current directory; you can change the workspace at any time without restarting by clicking the folder path in the header (folder browser, recent list, new folder) or with `dir <path>`. Recent workspaces are remembered in `~/.ratchet/state.json`. A yellow **MOCK** badge in the header shows when simulated agents are on.
+
 Flags: `--port <n>`, `--mock`, `--no-open`. The page URL carries a random token and the server binds to localhost only.
 
 Type a research task into the terminal at the bottom and press enter. The swarm graph, account pool, live feed, claim ledger and report fill in as it runs. Type `help` for commands.
@@ -151,7 +153,7 @@ Output lives in `<workspace>/.ratchet/runs/<id>/opt/`: `archive.json`, `failures
 | --- | --- |
 | `run <task>` | Launch a research swarm (bare text does the same) |
 | `opt init \| start [goal] \| apply` | Optimise loop |
-| `dir [path]` | Show or change the workspace |
+| `dir [path\|n]`, `dir recent`, `dir mk <path>` | Show, change, list recent, or create-and-switch the workspace |
 | `accounts`, `account add\|login\|probe\|rm` | Manage the pool |
 | `runs`, `stop [id\|all]`, `report [id]` | Inspect and control runs |
 | `mode auto\|yolo` | `auto` = workspace-write sandbox, `yolo` = no sandbox |

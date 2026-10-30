@@ -21,7 +21,8 @@
       <span class="word">RATCHET</span>
       <span class="tag">swarm research</span>
     </div>
-    <div class="ws" id="ws" title="workspace"></div>
+    <button class="ws" id="ws" title="change workspace folder"></button>
+    <div class="chip mock" id="mockChip" hidden>mock</div>
     <div class="stats" id="stats"></div>
     <div class="chip" id="modeChip">auto</div>
     <div class="chip live" id="conn">connecting</div>
@@ -64,6 +65,21 @@
     <div class="pane" id="report"><div class="muted">report appears when the swarm finishes</div></div>
     <div class="focus" id="focus" hidden></div>
   </aside>
+</div>
+<div id="picker" class="modal" hidden>
+  <div class="box">
+    <h3>WORKSPACE FOLDER</h3>
+    <form id="pickForm"><input id="pickPath" spellcheck="false" placeholder="/path/to/folder"><button type="submit">go</button></form>
+    <div class="recent" id="pickRecent"></div>
+    <div class="dirs" id="pickDirs"></div>
+    <div class="actions">
+      <label><input type="checkbox" id="pickHidden"> hidden</label>
+      <button id="pickNew" type="button">new folder</button>
+      <span class="grow"></span>
+      <button id="pickCancel" type="button">cancel</button>
+      <button id="pickUse" type="button" class="primary">use this folder</button>
+    </div>
+  </div>
 </div>
 <script src="/app.js" type="module"></script>
 </body>

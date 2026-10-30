@@ -108,6 +108,7 @@ function resetPanes() { $('#feed').innerHTML = ''; renderClaims(); renderReport(
 // ---------- renderers ----------
 function renderHeader() {
   $('#ws').textContent = S.settings.dir;
+  $('#mockChip').hidden = !S.settings.mock;
   const m = $('#modeChip'); m.textContent = S.settings.mode; m.classList.toggle('yolo', S.settings.mode === 'yolo');
 }
 
@@ -341,3 +342,40 @@ function connect() {
 }
 // replayed history rebuilds state from scratch on reconnect
 connect();
+
+// ---------- workspace picker ----------
+const pk = { path: '', home: '' };
+const api = (u) => fetch(u + (u.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(token)).then((r) => r.json());
+const sendCmd = (line) => fetch('/api/cmd', { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ line }) });
+
+async function browse(path) {
+  const r = await api(`/api/ls?path=${encodeURIComponent(path ?? '')}${$('#pickHidden').checked ? '&hidden=1' : ''}`);
+  const box = $('#pickDirs'); box.innerHTML = '';
+  if (r.error) { box.append(el('div', 'err', esc(r.error))); return; }
+  pk.path = r.path; pk.home = r.home;
+  $('#pickPath').value = r.path;
+  const up = el('div', 'up', '..'); up.onclick = () => browse(r.parent); box.append(up);
+  r.dirs.forEach((d) => { const row = el('div', '', esc(d)); row.onclick = () => browse(`${r.path.replace(/\/$/, '')}/${d}`); box.append(row); });
+  if (!r.dirs.length) box.append(el('div', 'err', 'no subfolders'));
+}
+function openPicker() {
+  $('#picker').hidden = false;
+  const rec = $('#pickRecent'); rec.innerHTML = '';
+  (S.settings.recent ?? []).forEach((d) => { const b = el('button', ''); b.type = 'button'; b.textContent = d; b.title = d; b.onclick = () => browse(d); rec.append(b); });
+  browse(S.settings.dir);
+  $('#pickPath').focus();
+}
+const closePicker = () => { $('#picker').hidden = true; $('#termIn').focus(); };
+$('#ws').onclick = openPicker;
+$('#pickCancel').onclick = closePicker;
+$('#picker').addEventListener('mousedown', (e) => { if (e.target.id === 'picker') closePicker(); });
+$('#pickForm').addEventListener('submit', (e) => { e.preventDefault(); browse($('#pickPath').value); });
+$('#pickHidden').onchange = () => browse(pk.path);
+$('#pickUse').onclick = async () => { await sendCmd(`dir ${pk.path}`); closePicker(); };
+$('#pickNew').onclick = async () => {
+  const name = prompt('New folder name (created inside the current folder):');
+  if (!name) return;
+  await sendCmd(`dir mk ${pk.path.replace(/\/$/, '')}/${name}`);
+  closePicker();
+};
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#picker').hidden) closePicker(); });

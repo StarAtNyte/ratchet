@@ -1,10 +1,11 @@
 import { createServer } from 'node:http';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { dirname, join, extname } from 'node:path';
+import { dirname, join, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AccountPool } from './accounts.mjs';
+import { AccountPool, HOME } from './accounts.mjs';
 import { Swarm } from './swarm.mjs';
 import { Optimizer } from './optimizer.mjs';
 import { execCommand, COMMANDS } from './commands.mjs';
@@ -12,6 +13,9 @@ import { execCommand, COMMANDS } from './commands.mjs';
 const UI = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 const MAX_EVENTS = 4000;
+const STATE = join(HOME, 'state.json');
+const loadRecent = () => { try { return JSON.parse(readFileSync(STATE, 'utf8')).recent ?? []; } catch { return []; } };
+const expand = (p) => resolve(String(p).replace(/^~(?=$|\/)/, homedir()));
 
 export async function startServer({ dir, port, mock, open }) {
   const token = randomBytes(16).toString('hex');
@@ -27,7 +31,12 @@ export async function startServer({ dir, port, mock, open }) {
     for (const c of clients) c.write(data);
   };
 
-  const settings = { dir, mode: 'auto', mock, slots: 2, workers: 6 };
+  const settings = { dir, mode: 'auto', mock, slots: 2, workers: 6, recent: loadRecent().filter((d) => existsSync(d)) };
+  const remember = (d) => {
+    settings.recent = [d, ...settings.recent.filter((x) => x !== d)].slice(0, 8);
+    try { writeFileSync(STATE, JSON.stringify({ recent: settings.recent })); } catch { /* best effort */ }
+  };
+  remember(dir);
   const pool = new AccountPool(emit, { mock });
   const swarm = new Swarm({ pool, emit, settings });
   const optimizer = new Optimizer(swarm);
@@ -56,6 +65,19 @@ export async function startServer({ dir, port, mock, open }) {
       return;
     }
 
+    if (url.pathname === '/api/ls') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      const path = expand(url.searchParams.get('path') || settings.dir);
+      try {
+        if (!statSync(path).isDirectory()) throw new Error('not a folder');
+        const dirs = readdirSync(path, { withFileTypes: true })
+          .filter((d) => d.isDirectory() && (url.searchParams.get('hidden') === '1' || !d.name.startsWith('.')))
+          .map((d) => d.name).sort((a, b) => a.localeCompare(b));
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ path, parent: dirname(path), dirs, home: homedir() }));
+      } catch (e) { res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: e.message, path })); }
+      return;
+    }
+
     if (url.pathname === '/api/cmd' && req.method === 'POST') {
       if (!authed(req, url)) return void res.writeHead(401).end();
       let body = '';
@@ -64,7 +86,7 @@ export async function startServer({ dir, port, mock, open }) {
       try { line = String(JSON.parse(body).line ?? ''); } catch { return void res.writeHead(400).end(); }
       res.writeHead(204).end();
       say(`❯ ${line}`, 'echo');
-      try { await execCommand(line, { say, swarm, pool, settings, optimizer }); }
+      try { await execCommand(line, { say, swarm, pool, settings, optimizer, remember }); }
       catch (e) { say(`error: ${e.message}`, 'err'); }
       return;
     }
