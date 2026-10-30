@@ -160,3 +160,8 @@ button:disabled, #termIn:disabled { opacity: 0.45; cursor: not-allowed; }
 #addAcc:hover { border-color: var(--color-accent); }
 button.ws { background: none; }
 .c-antigravity { background: var(--harness-antigravity); }
+
+.dact.primary, #drawer button.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-ink); font-weight: 500; }
+.codeRow { display: flex; gap: var(--space-xs); margin-top: var(--space-xs); }
+#loginCode { flex: 1; background: var(--color-paper-3); color: var(--color-ink); border: 1px solid var(--color-rule); padding: var(--space-xs) var(--space-sm); font: var(--text-xs) var(--font-outlier); }
+#loginCode:focus-visible { border-color: var(--color-accent); }

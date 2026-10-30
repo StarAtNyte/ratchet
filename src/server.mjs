@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -9,6 +9,8 @@ import { AccountPool, HOME } from './accounts.mjs';
 import { Swarm } from './swarm.mjs';
 import { Optimizer } from './optimizer.mjs';
 import { HARNESSES } from './harness.mjs';
+const CLEAN = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]/g;
+const LOGIN_CMD = { claude: ['claude', ['auth', 'login']], codex: ['codex', ['login', '--device-auth']] };
 import { execCommand, COMMANDS } from './commands.mjs';
 
 const UI = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
@@ -42,6 +44,29 @@ export async function startServer({ dir, port, mock, open }) {
   const swarm = new Swarm({ pool, emit, settings });
   const optimizer = new Optimizer(swarm);
   const say = (text, cls = '') => emit({ kind: 'term', text, cls });
+
+  const logins = new Map();
+  const startLogin = (a) => {
+    logins.get(a.id)?.kill();
+    const def = LOGIN_CMD[a.harness];
+    if (!def) { emit({ kind: 'login', id: a.id, text: `Sign in from a terminal: ${pool.loginHint(a)}`, done: true, ok: false }); return; }
+    if (a.configDir) mkdirSync(a.configDir, { recursive: true });
+    emit({ kind: 'login', id: a.id, reset: true, text: 'starting sign-in…' });
+    const p = spawn(def[0], def[1], { env: { ...process.env, ...pool.env(a) }, stdio: ['pipe', 'pipe', 'pipe'] });
+    logins.set(a.id, p);
+    const feed = (d) => {
+      const text = String(d).replace(CLEAN, '').replace(/\r/g, '');
+      if (!text.trim()) return;
+      emit({ kind: 'login', id: a.id, text, url: /https?:\/\/[^\s\x1b]+/.exec(text)?.[0] ?? null });
+    };
+    p.stdout.on('data', feed); p.stderr.on('data', feed);
+    p.on('error', (e) => emit({ kind: 'login', id: a.id, text: `could not start ${def[0]}: ${e.message}`, done: true, ok: false }));
+    p.on('close', (code) => {
+      logins.delete(a.id);
+      a.authed = code === 0; pool.publish(a);
+      emit({ kind: 'login', id: a.id, text: code === 0 ? 'signed in' : `sign-in ended (exit ${code})`, done: true, ok: code === 0 });
+    });
+  };
 
   const guard = (req, res) => {
     const host = (req.headers.host ?? '').split(':')[0];
@@ -77,6 +102,19 @@ export async function startServer({ dir, port, mock, open }) {
         res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ path, parent: dirname(path), dirs, home: homedir() }));
       } catch (e) { res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: e.message, path })); }
       return;
+    }
+
+    if ((url.pathname === '/api/login' || url.pathname === '/api/login/input') && req.method === 'POST') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      let body = '';
+      for await (const c of req) { body += c; if (body.length > 1e5) return void res.writeHead(413).end(); }
+      let j = {};
+      try { j = JSON.parse(body); } catch { return void res.writeHead(400).end(); }
+      const a = pool.get(String(j.id));
+      if (!a) return void res.writeHead(404).end();
+      if (url.pathname === '/api/login') startLogin(a);
+      else logins.get(a.id)?.stdin.write(`${String(j.text ?? '').trim()}\n`);
+      return void res.writeHead(204).end();
     }
 
     if (url.pathname === '/api/cmd' && req.method === 'POST') {

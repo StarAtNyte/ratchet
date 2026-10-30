@@ -63,13 +63,18 @@ Type a research task into the terminal at the bottom and press enter. The swarm 
 
 ## Accounts and harnesses
 
-An account is an isolated config folder plus a harness. In the terminal:
+An account is an isolated config folder plus a harness. Connect one from the UI:
+
+1. In the **Accounts** panel click **+ Add** and pick a harness.
+2. The account's details open. For Claude and Codex, sign-in starts automatically: click **open sign-in page**, approve in the browser, and for Claude paste the code it shows into the box (Codex shows a device code in the log). The account flips to *signed in*.
+3. Click any account later to re-run **sign in**, **check login**, or **remove** it.
+
+Antigravity (and other plain-text CLIs) cannot be signed in automatically; the drawer shows the exact command to run once in a terminal. The same actions exist as terminal commands:
 
 ```
-account add claude         # creates ~/.ratchet/accounts/claude-N and prints the login command
-account add codex
-account login codex-2      # codex device-code login, streamed into the terminal
-account probe              # checks which accounts are logged in
+account add claude | codex | antigravity
+account login <id>         # codex device-code login
+account probe              # which accounts are logged in
 accounts                   # status, load, done/failed, reset times
 account rm <id>
 ```

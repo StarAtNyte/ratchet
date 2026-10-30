@@ -10,6 +10,7 @@ const S = {
   settings: { dir: '', mode: 'auto', slots: 2 },
   commands: [],
   accounts: new Map(),
+  logins: {},
   runs: new Map(),
   current: null,
   tab: 'feed',
@@ -71,6 +72,13 @@ function apply(ev) {
     case 'settings': S.settings = ev.settings; renderHeader(); break;
     case 'term': say(ev.text, ev.cls); break;
     case 'account': S.accounts.set(ev.account.id, ev.account); renderAccounts(); break;
+    case 'login': {
+      const L = (S.logins[ev.id] = ev.reset ? { text: '', url: null, done: false } : (S.logins[ev.id] ?? { text: '', url: null, done: false }));
+      if (!ev.reset || ev.text) L.text += `${ev.text}\n`;
+      if (ev.url) L.url = ev.url;
+      if (ev.done) { L.done = true; L.ok = ev.ok; }
+      break;
+    }
     case 'account.remove': S.accounts.delete(ev.id); renderAccounts(); break;
     case 'run.start': { const r = run(ev.runId); r.task = ev.task; S.current = ev.runId; S.focus = null; resetPanes(); renderRunbar(); break; }
     case 'agent.start': { const r = run(ev.runId); r.agents.set(ev.id, { id: ev.id, role: ev.role, title: ev.title, parent: ev.parent, harness: null, account: null, status: 'queued', born: ev.t, prompt: ev.prompt, failovers: 0, attempts: [] }); renderRunbar(); break; }
@@ -421,10 +429,24 @@ function openAgent(id) { drawer = { type: 'agent', id }; $('#drawer').hidden = f
 $('#dclose').onclick = () => { drawer = null; $('#drawer').hidden = true; };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer && $('#picker').hidden) $('#dclose').click(); });
 
+const api2 = (u, b) => fetch(u, { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify(b) });
+const beginLogin = (id) => { S.logins[id] = { text: '', url: null, done: false }; api2('/api/login', { id }); };
+function signInHtml(a) {
+  const L = S.logins[a.id];
+  const canAuto = a.harness === 'claude' || a.harness === 'codex';
+  const status = a.authed === true ? '<span class="pill done">signed in</span>' : a.authed === false ? '<span class="pill failed">not signed in</span>' : '<span class="pill">unknown</span>';
+  let h = `<div class="dsec">Sign in ${status}</div>`;
+  if (!canAuto) return h + `<div class="muted2">Automatic sign-in is not available for ${esc(a.harness)}. Run this in a terminal, then use check login:</div><div class="dpre">${esc(a.hint || 'uses your existing CLI login')}</div><div class="dacts"><button class="dact" data-act="copy">copy command</button></div>`;
+  h += `<div class="dacts"><button class="dact primary" data-act="signin">${L && !L.done ? 'restart sign-in' : 'sign in'}</button>${L?.url ? '<button class="dact primary" data-act="open">open sign-in page</button>' : ''}</div>`;
+  if (a.harness === 'claude' && L && !L.done) h += `<div class="muted2" style="margin-top:8px">After approving in the browser, paste the code it shows:</div><div class="codeRow"><input id="loginCode" spellcheck="false" placeholder="paste code"><button class="dact" data-act="send">submit</button></div>`;
+  if (a.harness === 'codex' && L && !L.done) h += `<div class="muted2" style="margin-top:8px">Open the page, then enter the code shown below.</div>`;
+  if (L) h += `<div class="dpre" style="margin-top:8px">${esc(L.text.trim() || 'waiting…')}</div>${L.done ? `<div class="${L.ok ? 'ok' : 'err'}" style="margin-top:4px">${L.ok ? 'Signed in. This account is ready.' : 'Sign-in did not finish. Try again.'}</div>` : ''}`;
+  return h;
+}
 const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
 function refreshDrawer() {
   if (!drawer) return;
-  const body = $('#dbody'); const keep = body.scrollTop;
+  const body = $('#dbody'); const keep = body.scrollTop; const typed = body.querySelector('#loginCode')?.value; const hadFocus = document.activeElement?.id === 'loginCode';
   if (drawer.type === 'account') {
     const a = S.accounts.get(drawer.id);
     if (!a) { $('#dclose').click(); return; }
@@ -437,12 +459,15 @@ function refreshDrawer() {
       ['logged in', a.authed === true ? 'yes' : a.authed === false ? 'no' : 'unknown (run probe)'],
       ['slots in use', `${a.load} / ${S.settings.slots}`], ['jobs done', a.done], ['jobs failed', a.failed],
       ['limit resets in', esc(left)], ['current task', esc(a.task ?? '-')], ['config folder', esc(a.configDir ?? '(default login)')],
-    ]) + (a.hint ? `<div class="dsec">Sign in</div><div class="dpre">${esc(a.hint)}</div><div class="dacts"><button class="dact" data-act="copy">copy command</button>${a.harness === 'codex' ? '<button class="dact" data-act="login">log in here</button>' : ''}</div>` : '<div class="muted2">Uses your existing CLI login.</div>')
+    ]) + signInHtml(a)
       + `<div class="dacts"><button class="dact" data-act="probe">check login</button><button class="dact" data-act="rm">remove account</button></div>`
       + `<div class="dsec">Recent jobs (${jobs.length})</div><div class="dlist">${jobs.slice(-12).reverse().map(({ r, g }, i) => `<div data-job="${r.id}/${g.id}"><span>${esc(r.id)} · ${esc(g.id)} · ${esc(g.title ?? '')}</span><span class="pill ${g.status}">${g.status}</span></div>`).join('') || '<div class="muted2">none yet</div>'}</div>`;
     body.querySelectorAll('[data-act]').forEach((b) => { b.onclick = () => {
       const act = b.dataset.act;
       if (act === 'copy') navigator.clipboard?.writeText(a.hint);
+      else if (act === 'signin') beginLogin(a.id);
+      else if (act === 'open') window.open(S.logins[a.id]?.url, '_blank', 'noopener');
+      else if (act === 'send') { const v = body.querySelector('#loginCode')?.value; if (v) { api2('/api/login/input', { id: a.id, text: v }); } }
       else if (act === 'rm') { if (confirm(`Remove ${a.id}?`)) { sendCmd(`account rm ${a.id}`); $('#dclose').click(); } }
       else sendCmd(`account ${act} ${a.id}`);
     }; });
@@ -469,6 +494,7 @@ function refreshDrawer() {
     body.querySelectorAll('[data-acc]').forEach((x) => { x.onclick = (e) => { e.preventDefault(); openAccount(x.dataset.acc); }; });
   }
   body.scrollTop = keep;
+  const box = body.querySelector('#loginCode'); if (box && typed) { box.value = typed; if (hadFocus) box.focus(); }
 }
 
 const HARNESS_NOTE = { claude: 'Claude Code (headless)', codex: 'Codex via SDK', antigravity: 'Antigravity CLI (experimental isolation)', gemini: 'Gemini CLI', opencode: 'OpenCode' };
@@ -480,7 +506,7 @@ $('#addAcc').onclick = () => {
       const before = new Set(S.accounts.keys());
       await sendCmd(`account add ${h}`);
       $('#addModal').hidden = true;
-      setTimeout(() => { const n = [...S.accounts.keys()].find((k) => !before.has(k)); if (n) openAccount(n); }, 300);
+      setTimeout(() => { const n = [...S.accounts.keys()].find((k) => !before.has(k)); if (n) { openAccount(n); if (h === 'claude' || h === 'codex') beginLogin(n); } }, 300);
     };
     box.append(b);
   });
