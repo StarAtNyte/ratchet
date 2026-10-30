@@ -99,6 +99,10 @@ Custom harness:
 
 **Terms of service.** Running several paid subscriptions side by side may conflict with a provider's terms on circumventing usage limits. Check each provider's terms; that call is yours.
 
+## Add an agent by hand
+
+Open the **Agents** tab and click **+ Add agent**: pick `auto`, `claude`, `codex` or another harness, optionally pin a specific account, name it, and describe the task. It runs on the workspace, joins the current run (or opens its own), shows on the graph, and its result and log are in its details. A pinned account is never swapped for another on failure.
+
 ## Research swarm
 
 ```

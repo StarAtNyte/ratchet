@@ -117,6 +117,18 @@ export async function startServer({ dir, port, mock, open }) {
       return void res.writeHead(204).end();
     }
 
+    if (url.pathname === '/api/agent' && req.method === 'POST') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      let body = '';
+      for await (const c of req) { body += c; if (body.length > 2e5) return void res.writeHead(413).end(); }
+      let j = {};
+      try { j = JSON.parse(body); } catch { return void res.writeHead(400).end(); }
+      if (!String(j.prompt ?? '').trim()) return void res.writeHead(400).end('prompt required');
+      if (!pool.list().length) return void res.writeHead(409).end('no accounts');
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(swarm.adhoc({ harness: String(j.harness ?? 'any'), account: j.account ? String(j.account) : null, title: String(j.title ?? '').slice(0, 80), prompt: String(j.prompt) })));
+      return;
+    }
+
     if (url.pathname === '/api/cmd' && req.method === 'POST') {
       if (!authed(req, url)) return void res.writeHead(401).end();
       let body = '';

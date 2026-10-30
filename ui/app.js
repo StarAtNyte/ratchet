@@ -103,6 +103,7 @@ function apply(ev) {
       if (ev.champion) say(`★ ${ev.agentId} new champion ${Number(ev.score).toFixed(4)} · ${ev.idea}`, 'ok');
       break;
     }
+    case 'agent.output': { const a = run(ev.runId).agents.get(ev.agentId); if (a) a.output = ev.text; break; }
     case 'claims': {
       const r = run(ev.runId);
       ev.claims.forEach((c) => r.claims.set(c.id, c));
@@ -413,6 +414,7 @@ function renderAgents() {
   $('#agentN').textContent = r ? r.agents.size : 0;
   if (S.tab !== 'agents') return;
   box.innerHTML = '';
+  const add = el('button', 'dact primary addAgent', '+ Add agent'); add.type = 'button'; add.onclick = openAgentModal; box.append(add);
   if (!r || !r.agents.size) { box.append(el('div', 'muted', 'no agents yet')); return; }
   [...r.agents.values()].forEach((a) => {
     const col = a.status === 'failed' ? COLORS.bad : COLORS[harnessOf(a)] ?? COLORS.none;
@@ -489,6 +491,7 @@ function refreshDrawer() {
     ])
       + (claims.length ? `<div class="dsec">Claims (${claims.length})</div>${claims.map((c) => `<div class="claim ${c.verdict}"><div class="h"><span>${esc(c.id)}</span><span class="badge">${c.verdict.toUpperCase()}</span></div><div class="t">${esc(c.text)}</div>${c.note ? `<div class="note">${esc(c.note)}</div>` : ''}</div>`).join('')}` : '')
       + `<div class="dsec">Activity (${logs.length})</div><div class="dpre">${logs.map((f) => `${f.kind === 'tool' ? '> ' : f.kind === 'err' ? '! ' : ''}${esc(f.text)}`).join('\n') || 'no output yet'}</div>`
+      + (a.output ? `<div class="dsec">Result</div><div class="dpre">${esc(a.output)}</div>` : '')
       + (a.prompt ? `<div class="dsec">Prompt</div><div class="dpre">${esc(a.prompt)}</div>` : '');
     body.querySelectorAll('[data-ag]').forEach((x) => { x.onclick = (e) => { e.preventDefault(); openAgent(x.dataset.ag); }; });
     body.querySelectorAll('[data-acc]').forEach((x) => { x.onclick = (e) => { e.preventDefault(); openAccount(x.dataset.acc); }; });
@@ -515,3 +518,29 @@ $('#addAcc').onclick = () => {
 $('#addCancel').onclick = () => { $('#addModal').hidden = true; };
 $('#addModal').addEventListener('mousedown', (e) => { if (e.target.id === 'addModal') $('#addModal').hidden = true; });
 setInterval(() => { if (drawer && drawer.type === 'agent') refreshDrawer(); }, 2000);
+
+// ---------- add agent ----------
+const ag = { harness: 'any' };
+function fillAccounts() {
+  const sel = $('#agAccount'); sel.innerHTML = '<option value="">any available</option>';
+  [...S.accounts.values()].filter((a) => ag.harness === 'any' || a.harness === ag.harness).sort((x, y) => x.id.localeCompare(y.id))
+    .forEach((a) => { const o = document.createElement('option'); o.value = a.id; o.textContent = `${a.id}${a.status === 'limited' ? ' (limited)' : ''}`; sel.append(o); });
+}
+function openAgentModal() {
+  const seg = $('#agHarness'); seg.innerHTML = '';
+  const kinds = ['any', ...new Set([...S.accounts.values()].map((a) => a.harness))];
+  kinds.forEach((h) => { const b = el('button', h === ag.harness ? 'on' : ''); b.type = 'button'; b.textContent = h === 'any' ? 'auto' : h; b.onclick = () => { ag.harness = h; seg.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); fillAccounts(); }; seg.append(b); });
+  fillAccounts(); $('#agErr').textContent = ''; $('#agentModal').hidden = false; $('#agPrompt').focus();
+}
+$('#agCancel').onclick = () => { $('#agentModal').hidden = true; };
+$('#agentModal').addEventListener('mousedown', (e) => { if (e.target.id === 'agentModal') $('#agentModal').hidden = true; });
+$('#agRun').onclick = async () => {
+  const prompt = $('#agPrompt').value.trim();
+  if (!prompt) { $('#agErr').textContent = 'write what the agent should do'; return; }
+  const r = await fetch('/api/agent', { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ harness: ag.harness, account: $('#agAccount').value || null, title: $('#agTitle').value.trim(), prompt }) });
+  if (!r.ok) { $('#agErr').textContent = r.status === 409 ? 'no accounts yet: add one first' : 'could not start the agent'; return; }
+  const j = await r.json();
+  $('#agentModal').hidden = true; $('#agPrompt').value = ''; $('#agTitle').value = '';
+  setTimeout(() => openAgent(j.agentId), 200);
+};
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#agentModal').hidden) $('#agentModal').hidden = true; });

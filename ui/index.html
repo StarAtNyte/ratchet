@@ -84,6 +84,17 @@
     </div>
   </div>
 </div>
+<div id="agentModal" class="modal" hidden>
+  <div class="box">
+    <h3>Add agent</h3>
+    <div class="muted2">Run one agent on the workspace. Pick a harness, optionally pin an account, and tell it what to do.</div>
+    <div id="agHarness" class="seg"></div>
+    <div class="fieldrow"><label for="agAccount">Account</label><select id="agAccount"></select></div>
+    <div class="fieldrow"><label for="agTitle">Name</label><input id="agTitle" spellcheck="false" placeholder="short label, optional"></div>
+    <textarea id="agPrompt" rows="6" spellcheck="false" placeholder="What should this agent do?"></textarea>
+    <div class="actions"><span id="agErr" class="err"></span><span class="grow"></span><button id="agCancel" type="button">cancel</button><button id="agRun" type="button" class="primary">run agent</button></div>
+  </div>
+</div>
 <div id="addModal" class="modal" hidden>
   <div class="box">
     <h3>Add account</h3>

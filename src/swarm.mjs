@@ -28,13 +28,14 @@ export class Swarm {
   }
 
   /** Pick the best account for a harness preference, waiting for slots / resets. */
-  async acquire(pref, signal, onWait) {
+  async acquire(pref, signal, onWait, pin = null) {
     let announced = false;
     for (;;) {
       if (signal.aborted) throw new Error('aborted');
       const all = this.pool.list();
       all.forEach((a) => this.pool.refresh(a));
-      const usable = all.filter((a) => a.limitedUntil <= Date.now());
+      const usable = all.filter((a) => a.limitedUntil <= Date.now() && (!pin || a.id === pin));
+      if (pin && !all.some((a) => a.id === pin)) throw new Error(`account ${pin} not found`);
       if (!all.length) throw new Error('no accounts registered (try: account add claude)');
       if (!usable.length) {
         const wake = Math.min(...all.map((a) => a.limitedUntil));
@@ -75,7 +76,7 @@ export class Swarm {
 
     for (let attempt = 0; attempt < 6; attempt++) {
       let acct;
-      try { acct = await this.acquire(avoid ? this.other(avoid) : spec.pref, run.abort.signal, (m) => log('sys', m)); }
+      try { acct = await this.acquire(avoid ? this.other(avoid) : spec.pref, run.abort.signal, (m) => log('sys', m), spec.pin ?? null); }
       catch (e) { return this.finish(run, rec, { ok: false, text: '', error: e.message }); }
       rec.harness = acct.harness; rec.account = acct.id;
       acct.task = `${spec.role}: ${spec.title}`;
@@ -102,7 +103,7 @@ export class Swarm {
       }
       this.pool.publish(acct);
       log('err', res.error ?? 'failed');
-      avoid = acct.harness; // try the other harness next
+      avoid = spec.pin ? null : acct.harness; // try the other harness next unless pinned
     }
     return this.finish(run, rec, { ok: false, text: '', error: 'gave up after repeated failures' });
   }
@@ -126,6 +127,27 @@ export class Swarm {
     const run = this.newRun(task);
     this.drive(run).catch((e) => this.end(run, 'failed', e.message));
     return run;
+  }
+
+  /** One user-launched agent on a chosen harness/account; joins the running run or opens its own. */
+  adhoc({ harness = 'any', account = null, title, prompt }) {
+    let run = [...this.runs.values()].reverse().find((r) => r.status === 'running');
+    const own = !run;
+    if (own) {
+      run = this.newRun('ad-hoc agent');
+      this.emit({ kind: 'agent.start', runId: run.id, id: 'lead', role: 'lead', title: 'You', parent: null, harness: null, account: null });
+      run.agents.set('lead', { id: 'lead', role: 'lead', title: 'You' });
+      this.emit({ kind: 'agent.end', runId: run.id, agentId: 'lead', ok: true, error: null });
+    }
+    const id = `m${(run.manual = (run.manual ?? 0) + 1)}`;
+    this.agent(run, {
+      id, role: 'worker', title: title || 'Ad-hoc agent', parent: 'lead', pref: harness, pin: account || null,
+      prompt: `[[ROLE:adhoc]]\n${this.ctx(run)}\nNotes and artifacts belong under ${join(run.root, 'findings', id + '-work')}/.\n\nTask from the user:\n${prompt}`,
+    }).then((res) => {
+      this.emit({ kind: 'agent.output', runId: run.id, agentId: id, text: String(res.text ?? '').slice(0, 20000) });
+      if (own) this.end(run, res.ok ? 'done' : 'failed', res.ok ? null : res.error);
+    });
+    return { runId: run.id, agentId: id };
   }
 
   stop(id) {
