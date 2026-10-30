@@ -234,11 +234,17 @@ In priority order. Each item is scoped so it can be built and checked on its own
 
 ## ForgeKernel campaigns
 
-Ratchet can wrap independent ForgeKernel task directories in a single swarm. Install ForgeKernel and set `RATCHET_FORGE_BIN` to its `forge` executable, or install it at `~/.ratchet/forgekernel-venv/bin/forge`. Configure ForgeKernel's GPU delivery, provider credentials, and each task according to its own documentation before starting a campaign.
+Ratchet can wrap independent ForgeKernel task directories in a single swarm. Select your ForgeKernel checkout (which must have its own `.venv/bin/forge` installation):
 
 ```
-forge check /path/to/task
-forge start /path/to/task-a /path/to/task-b
+forge use /path/to/ForgeKernel
+forge status
+forge check /path/to/ForgeKernel/tasks/my-task
+forge start /path/to/ForgeKernel/tasks/my-task
 ```
 
-`forge check` runs ForgeKernel's dry run. `forge start` creates one independent ForgeKernel campaign per task and streams each campaign's output into the graph and activity feed. Run artifacts and reports live under the Ratchet run's `forge/` directory. `stop all` requests termination of the local ForgeKernel processes. ForgeKernel uses its own provider/model configuration and GPU locking; Ratchet account-pool settings do not apply to its internal agents. Remote job termination, Modal GPU delivery and benchmark isolation across separate GPU hosts require additional integration and have not been verified.
+You can also pass the checkout's `src/forgekernel` directory to `forge use`. Ratchet saves the selected checkout locally in `~/.ratchet/forge.json`. `RATCHET_FORGE_BIN` overrides the saved selection; without either, Ratchet uses `~/.ratchet/forgekernel-venv/bin/forge`.
+
+`forge check` runs ForgeKernel's dry run. `forge start` accepts multiple space-separated task directories and launches one independent campaign for each. Output appears in the graph and Activity; artifacts and reports are saved under the Ratchet run's `forge/` directory. Each ForgeKernel checkout supplies its own GPU delivery, model, and provider configuration. Ratchet's account pool and model settings do not control ForgeKernel's internal agents.
+
+An adapted checkout can use Modal H200 when its ForgeKernel configuration supports it; the upstream checkout does not provide that delivery mode. ForgeKernel's local GPU-job lock coordinates its own jobs, but cross-host GPU isolation and remote-job cancellation have not been verified. `stop all` terminates the local ForgeKernel campaign processes; check your provider for any jobs they started remotely. The ForgeKernel wrapper has been tested with simulated campaigns and a real dry run, not an end-to-end GPU campaign.

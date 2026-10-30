@@ -167,3 +167,20 @@ test('ForgeKernel wrapper runs separate campaigns and records their results', as
     assert.throws(() => forge.start(['missing']), /No task.toml/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('ForgeKernel checkout selection accepts source path and persists the executable', async () => {
+  const { ForgeSwarm } = await import('../src/forge.mjs');
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'ratchet-forge-select-'));
+  try {
+    const checkout = join(root, 'checkout'); mkdirSync(join(checkout, 'src', 'forgekernel'), { recursive: true }); mkdirSync(join(checkout, '.venv', 'bin'), { recursive: true });
+    writeFileSync(join(checkout, 'src', 'forgekernel', '__main__.py'), ''); writeFileSync(join(checkout, 'pyproject.toml'), '');
+    writeFileSync(join(checkout, '.venv', 'bin', 'forge'), '#!/bin/sh\nprintf "forgekernel test\\n"\n', { mode: 0o755 });
+    const configFile = join(root, 'config', 'forge.json'); const swarm = { settings: { dir: root } };
+    const forge = new ForgeSwarm(swarm, { configFile }); const selected = await forge.use(join(checkout, 'src', 'forgekernel'), root);
+    assert.equal(selected.checkout, checkout); assert.equal(new ForgeSwarm(swarm, { configFile }).binary, join(checkout, '.venv', 'bin', 'forge'));
+    await assert.rejects(forge.use(join(root, 'missing'), root), /Not a ForgeKernel checkout/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

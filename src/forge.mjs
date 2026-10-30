@@ -1,12 +1,37 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { HOME } from './accounts.mjs';
 
 export class ForgeSwarm {
-  constructor(swarm, { binary = process.env.RATCHET_FORGE_BIN || join(HOME, 'forgekernel-venv', 'bin', 'forge') } = {}) {
+  constructor(swarm, { binary, configFile = join(HOME, 'forge.json') } = {}) {
     this.swarm = swarm;
-    this.binary = binary;
+    this.configFile = configFile;
+    let saved = {};
+    try { saved = JSON.parse(readFileSync(configFile, 'utf8')); } catch {}
+    this.binary = binary || process.env.RATCHET_FORGE_BIN || saved.binary || join(HOME, 'forgekernel-venv', 'bin', 'forge');
+    this.checkout = saved.checkout || null;
+  }
+
+  async use(path, cwd) {
+    if (process.env.RATCHET_FORGE_BIN) throw new Error('RATCHET_FORGE_BIN overrides the saved checkout; unset it before changing the checkout.');
+    const expanded = String(path).replace(/^~(?=$|\/)/, homedir());
+    let checkout = resolve(cwd, expanded);
+    if (basename(checkout) === 'forgekernel' && basename(dirname(checkout)) === 'src') checkout = dirname(dirname(checkout));
+    else if (basename(checkout) === 'src') checkout = dirname(checkout);
+    const binary = join(checkout, '.venv', 'bin', 'forge');
+    if (!existsSync(join(checkout, 'src', 'forgekernel', '__main__.py')) || !existsSync(join(checkout, 'pyproject.toml'))) throw new Error(`Not a ForgeKernel checkout: ${checkout}`);
+    try { accessSync(binary, constants.X_OK); } catch { throw new Error(`ForgeKernel executable not found: ${binary}. Install it into the checkout's .venv first.`); }
+    const previous = this.binary; this.binary = binary;
+    const result = await this.command(['--version'], { cwd: checkout });
+    if (!result.ok || !/forgekernel/i.test(result.output)) { this.binary = previous; throw new Error(`Could not verify ForgeKernel: ${result.error || result.output}`); }
+    this.checkout = checkout;
+    mkdirSync(dirname(this.configFile), { recursive: true });
+    const temp = `${this.configFile}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify({ checkout, binary }, null, 2) + '\n', { mode: 0o600 });
+    renameSync(temp, this.configFile);
+    return { checkout, binary, version: result.output.trim() };
   }
 
   async command(args, { cwd, env = {}, signal, log = () => {} } = {}) {
@@ -30,14 +55,15 @@ export class ForgeSwarm {
   }
 
   async check(task, cwd) {
-    return this.command(['new', resolve(cwd, task), '--dry-run'], { cwd });
+    const path = String(task).replace(/^~(?=$|\/)/, homedir());
+    return this.command(['new', resolve(cwd, path), '--dry-run'], { cwd });
   }
 
   start(tasks) {
     const cwd = this.swarm.settings.dir;
     if (!tasks.length) throw new Error('Usage: forge start <task-directory> [task-directory ...]');
     if (tasks.length > 12) throw new Error('At most 12 ForgeKernel campaigns can be started together.');
-    const paths = tasks.map((task) => resolve(cwd, task));
+    const paths = tasks.map((task) => resolve(cwd, String(task).replace(/^~(?=$|\/)/, homedir())));
     for (const task of paths) if (!existsSync(join(task, 'task.toml'))) throw new Error(`No task.toml in ${task}`);
     const run = this.swarm.newRun(`ForgeKernel: ${paths.map((path) => basename(path)).join(', ')}`, 'forge');
     this.drive(run, paths, cwd).catch((error) => this.swarm.end(run, 'failed', error.message));
