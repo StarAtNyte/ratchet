@@ -275,7 +275,7 @@ function frame(t) {
     const vals = sc.map((a) => a.score); const asc = vals[vals.length - 1] >= vals[0];
     let best = vals[0]; const curve = vals.map((v) => (best = asc ? Math.max(best, v) : Math.min(best, v)));
     const lo = Math.min(...vals); const hi = Math.max(...vals); const bx = W - 190; const by = H - 70; const bw = 170; const bh = 48;
-    ctx.fillStyle = COLORS.paper; ctx.strokeStyle = COLORS.rule; ctx.beginPath(); ctx.roundRect(bx - 10, by - 22, bw + 20, bh + 34, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = COLORS.paper; ctx.strokeStyle = COLORS.rule; ctx.beginPath(); ctx.rect(bx - 10, by - 22, bw + 20, bh + 34); ctx.fill(); ctx.stroke();
     ctx.fillStyle = COLORS.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`best ${curve[curve.length - 1].toFixed(3)} · ${sc.length} tries`, bx, by - 8);
     const X = (i) => bx + (i / (curve.length - 1)) * bw; const Y = (v) => by + bh - ((v - lo) / (hi - lo || 1)) * bh;
     ctx.strokeStyle = tint(COLORS.muted, 40); ctx.lineWidth = 1; ctx.beginPath(); vals.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
@@ -333,7 +333,7 @@ function frame(t) {
     const label = `${hover.title ?? hover.id}${hover.account ? '  ·  ' + hover.account : ''}  ·  ${hover.status}`;
     ctx.font = '12px ui-sans-serif, system-ui, sans-serif'; const w = ctx.measureText(label).width + 16;
     const x = Math.min(Math.max(mouse.x - w / 2, 6), W - w - 6); const y = mouse.y - 34;
-    ctx.fillStyle = COLORS.panel; ctx.strokeStyle = COLORS.rule; ctx.beginPath(); ctx.roundRect(x, y, w, 22, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = COLORS.panel; ctx.strokeStyle = COLORS.rule; ctx.beginPath(); ctx.rect(x, y, w, 22); ctx.fill(); ctx.stroke();
     ctx.fillStyle = COLORS.lead; ctx.textAlign = 'left'; ctx.fillText(label, x + 8, y + 15);
   }
   cv.style.cursor = hover ? 'pointer' : 'crosshair';

@@ -13,6 +13,8 @@
   --shade: oklch(0% 0 0 / 0.5);
   --hover: color-mix(in oklab, var(--color-ink) 5%, transparent);
   --font-label: var(--font-body);
+  --radius-card: 0;
+  --radius-pill: 0;
 }
 
 html, body { height: 100%; }
