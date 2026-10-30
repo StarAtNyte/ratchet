@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ratchet</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%233df5c8' stroke-width='4' stroke-dasharray='5 3'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -46,12 +47,31 @@
         <div>type a research task below and press enter</div>
       </div>
     </section>
+    <div class="splitter" id="split" role="separator" aria-orientation="horizontal" aria-label="Resize the graph and terminal" tabindex="0"></div>
     <section id="term">
-      <div id="termOut"></div>
-      <form id="termForm" autocomplete="off">
-        <span class="prompt">›</span>
-        <input id="termIn" spellcheck="false" autofocus placeholder="describe a research task, or type help">
-      </form>
+      <div class="termbar">
+        <div class="ttabs" role="tablist">
+          <button type="button" data-tt="console" class="on" role="tab">Console</button>
+          <button type="button" data-tt="shell" role="tab">Shell</button>
+        </div>
+        <span class="tcwd" id="tcwd"></span>
+        <div class="tacts">
+          <button type="button" id="tNewShell" hidden>new shell</button>
+          <button type="button" id="tClear">clear</button>
+          <button type="button" id="tMax">expand</button>
+        </div>
+      </div>
+      <div class="tview on" id="consoleView">
+        <div id="termOut" aria-live="polite"></div>
+        <div id="suggest" role="listbox" hidden></div>
+        <div class="quick" id="quick"></div>
+        <form id="termForm" autocomplete="off">
+          <span class="prompt">›</span>
+          <input id="termIn" spellcheck="false" autofocus placeholder="describe a research task, or type a command (Tab completes)">
+          <span class="kbd">Enter run · Tab complete · ↑ history</span>
+        </form>
+      </div>
+      <div class="tview" id="shellView"><div id="xterm"></div></div>
     </section>
   </main>
 
@@ -103,6 +123,8 @@
   </div>
 </div>
 <aside id="drawer" hidden><div class="dhead"><b id="dtitle"></b><button id="dclose" type="button">close</button></div><div id="dbody"></div></aside>
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
 <script src="/app.js" type="module"></script>
 </body>
 </html>

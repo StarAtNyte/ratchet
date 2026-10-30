@@ -25,29 +25,178 @@ const stick = (box, fn) => { const near = box.scrollHeight - box.scrollTop - box
 const termOut = $('#termOut');
 function say(text, cls = '') { stick(termOut, () => { const d = el('div', cls); d.textContent = text; termOut.append(d); }); }
 
-const hist = []; let hi = 0;
-$('#termForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const input = $('#termIn');
-  const line = input.value.trim();
+// command catalogue drives completion and the suggestion list
+const CATALOG = [
+  ['run', '<task>', 'launch a research swarm (or just type the task)'],
+  ['opt', 'init | start [goal] | apply', 'evolutionary optimise loop'],
+  ['resume', '<run>', 're-run an interrupted research run'],
+  ['stop', '[run|all]', 'stop a run'],
+  ['runs', '', 'list runs'],
+  ['report', '[run]', 'print a run report'],
+  ['accounts', '', 'list the account pool'],
+  ['account', 'add | login | probe | rm', 'manage accounts'],
+  ['dir', '<path> | recent | mk <path>', 'change the workspace'],
+  ['mode', 'yolo | auto', 'agent permission level'],
+  ['set', 'slots | workers | timeout | rounds <n>', 'tune the swarm'],
+  ['clear', '', 'clear the console'],
+  ['help', '', 'all commands'],
+];
+const hist = JSON.parse(localStorage.getItem('ratchet.hist') || '[]'); let hi = hist.length;
+const sug = { items: [], sel: -1 };
+const termIn = $('#termIn');
+
+function argChoices(cmd, sub) {
+  const runs = [...S.runs.keys()].reverse();
+  const accts = [...S.accounts.keys()];
+  if (['stop', 'report'].includes(cmd)) return ['all', ...runs];
+  if (cmd === 'resume') return [...S.runs.values()].filter((r) => r.status !== 'running' && r.status !== 'done').map((r) => r.id).reverse();
+  if (cmd === 'account') return sub === undefined ? ['add', 'login', 'probe', 'rm'] : sub === 'add' ? (S.harnesses ?? []) : accts;
+  if (cmd === 'mode') return ['yolo', 'auto'];
+  if (cmd === 'set') return sub === undefined ? ['slots', 'workers', 'timeout', 'rounds'] : [];
+  if (cmd === 'opt') return sub === undefined ? ['init', 'start', 'apply'] : [];
+  if (cmd === 'dir') return sub === undefined ? ['recent', 'mk', ...(S.settings.recent ?? [])] : [];
+  return [];
+}
+async function computeSuggestions() {
+  const v = termIn.value;
+  const parts = v.split(/\s+/);
+  if (!v.trim()) return [];
+  if (parts.length === 1) return CATALOG.filter(([c]) => c.startsWith(parts[0]) && c !== parts[0]).map(([c, a, d]) => ({ value: `${c} `, label: c, hint: a, desc: d }));
+  const [cmd, ...rest] = parts;
+  if (!CATALOG.some(([c]) => c === cmd)) return [];
+  const last = rest[rest.length - 1] ?? '';
+  const head = v.slice(0, v.length - last.length);
+  if (cmd === 'dir' && rest.length >= 1 && (last.startsWith('/') || last.startsWith('~') || last.startsWith('.'))) {
+    const base = last.endsWith('/') ? last : last.slice(0, last.lastIndexOf('/') + 1) || './';
+    const prefix = last.slice(base.length);
+    try {
+      const r = await api(`/api/ls?path=${encodeURIComponent(base)}`);
+      return (r.dirs ?? []).filter((d) => d.startsWith(prefix)).slice(0, 12).map((d) => ({ value: `${head}${base}${d}/`, label: `${base}${d}/`, hint: '', desc: 'folder' }));
+    } catch { return []; }
+  }
+  const choices = argChoices(cmd, rest.length > 1 ? rest[0] : undefined);
+  return choices.filter((c) => String(c).startsWith(last) && c !== last).slice(0, 12).map((c) => ({ value: `${head}${c} `, label: String(c), hint: '', desc: S.runs.get(c)?.task ?? S.accounts.get(c)?.harness ?? '' }));
+}
+function renderSuggest() {
+  const box = $('#suggest');
+  if (!sug.items.length) { box.hidden = true; return; }
+  box.hidden = false; box.innerHTML = '';
+  sug.items.forEach((it, i) => {
+    const row = el('div', `sg${i === sug.sel ? ' on' : ''}`, `<b>${esc(it.label)}</b>${it.hint ? ` <span class="h">${esc(it.hint)}</span>` : ''}<span class="d">${esc(it.desc ?? '')}</span>`);
+    row.setAttribute('role', 'option');
+    row.onmousedown = (e) => { e.preventDefault(); termIn.value = it.value; refreshSuggest(); termIn.focus(); };
+    box.append(row);
+  });
+}
+let sugTimer = 0;
+function refreshSuggest() { clearTimeout(sugTimer); sugTimer = setTimeout(async () => { sug.items = await computeSuggestions(); sug.sel = -1; renderSuggest(); }, 60); }
+termIn.addEventListener('input', refreshSuggest);
+termIn.addEventListener('blur', () => setTimeout(() => { $('#suggest').hidden = true; }, 120));
+
+async function submitLine(line) {
   if (!line) return;
-  input.value = '';
-  hist.push(line); hi = hist.length;
+  if (hist[hist.length - 1] !== line) hist.push(line);
+  while (hist.length > 300) hist.shift();
+  localStorage.setItem('ratchet.hist', JSON.stringify(hist)); hi = hist.length;
   if (line === 'clear') { termOut.innerHTML = ''; return; }
   await fetch('/api/cmd', { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify({ line }) });
+}
+$('#termForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const line = termIn.value.trim();
+  termIn.value = ''; sug.items = []; renderSuggest();
+  await submitLine(line);
 });
-$('#termIn').addEventListener('keydown', (e) => {
-  const input = e.target;
-  if (e.key === 'ArrowUp') { e.preventDefault(); if (hi > 0) input.value = hist[--hi]; }
-  else if (e.key === 'ArrowDown') { e.preventDefault(); input.value = hi < hist.length - 1 ? hist[++hi] : (hi = hist.length, ''); }
-  else if (e.key === 'Tab') {
+termIn.addEventListener('keydown', (e) => {
+  const open = sug.items.length > 0 && !$('#suggest').hidden;
+  if (e.key === 'Tab') {
     e.preventDefault();
-    const m = S.commands.filter((c) => c.startsWith(input.value));
-    if (m.length === 1) input.value = `${m[0]} `;
-    else if (m.length > 1) say(m.join('  '), 'dim');
-  }
+    if (!sug.items.length) return;
+    const it = sug.items[sug.sel >= 0 ? sug.sel : 0];
+    termIn.value = it.value; refreshSuggest();
+  } else if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && sug.sel >= 0) {
+    e.preventDefault();
+    sug.sel = (sug.sel + (e.key === 'ArrowDown' ? 1 : -1) + sug.items.length) % sug.items.length; renderSuggest();
+  } else if (open && e.key === 'ArrowDown') { e.preventDefault(); sug.sel = 0; renderSuggest(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); if (hi > 0) termIn.value = hist[--hi]; sug.items = []; renderSuggest(); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); termIn.value = hi < hist.length - 1 ? hist[++hi] : (hi = hist.length, ''); }
+  else if (e.key === 'Escape') { sug.items = []; renderSuggest(); }
+  else if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); termOut.innerHTML = ''; }
+  else if (e.key === 'u' && e.ctrlKey) { e.preventDefault(); termIn.value = ''; refreshSuggest(); }
+  else if (e.key === 'Enter' && open && sug.sel >= 0) { e.preventDefault(); termIn.value = sug.items[sug.sel].value; refreshSuggest(); }
 });
-document.addEventListener('keydown', (e) => { if (!e.ctrlKey && !e.metaKey && !e.altKey && e.target === document.body) $('#termIn').focus(); });
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.target !== document.body) return;
+  if (TT.tab === 'shell' && xt.term) xt.term.focus(); else termIn.focus();
+});
+
+// quick chips
+[['help', 'help'], ['accounts', 'accounts'], ['runs', 'runs'], ['stop all', 'stop all'], ['mode', 'mode'], ['dir recent', 'dir recent']].forEach(([label, line]) => {
+  const b = el('button', 'chipBtn'); b.type = 'button'; b.textContent = label; b.onclick = () => submitLine(line); $('#quick').append(b);
+});
+
+// ---------- terminal tabs, shell, split, expand ----------
+const TT = { tab: 'console' };
+const xt = { term: null, fit: null, id: sessionStorage.getItem('ratchet.shell') || null, es: null, out: '', timer: 0, dead: false };
+const toRgb = (c) => { const cv2 = document.createElement('canvas'); cv2.width = cv2.height = 1; const x = cv2.getContext('2d'); x.fillStyle = c; x.fillRect(0, 0, 1, 1); const [r, g, b] = x.getImageData(0, 0, 1, 1).data; return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`; };
+const shellPost = (op, body) => fetch(`/api/shell/${op}`, { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+async function shellConnect(fresh) {
+  if (!xt.term) {
+    if (!window.Terminal) { $('#xterm').textContent = 'The shell needs /vendor/xterm.js. Reinstall Ratchet.'; return; }
+    xt.term = new window.Terminal({
+      fontFamily: css('--font-outlier') || 'monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: true, allowProposedApi: false, scrollback: 5000,
+      theme: { background: toRgb(css('--color-paper-3')), foreground: toRgb(css('--color-ink')), cursor: toRgb(css('--color-accent')), selectionBackground: toRgb(css('--color-accent-soft')), black: toRgb(css('--color-paper-2')), brightBlack: toRgb(css('--color-muted')), red: toRgb(css('--color-bad')), green: toRgb(css('--color-ok')), yellow: toRgb(css('--color-accent')), blue: toRgb(css('--color-cool')), cyan: toRgb(css('--harness-codex')), magenta: toRgb(css('--harness-antigravity')), white: toRgb(css('--color-ink-2')), brightWhite: toRgb(css('--color-ink')) },
+    });
+    xt.fit = new window.FitAddon.FitAddon();
+    xt.term.loadAddon(xt.fit);
+    xt.term.open($('#xterm'));
+    xt.term.onData((d) => {
+      if (xt.dead) { if (d === '\r') shellConnect(true); return; }
+      xt.out += d; clearTimeout(xt.timer); xt.timer = setTimeout(() => { const data = xt.out; xt.out = ''; shellPost('input', { id: xt.id, data }); }, 6);
+    });
+    let rt = 0;
+    new ResizeObserver(() => { if (TT.tab !== 'shell') return; clearTimeout(rt); rt = setTimeout(() => { try { xt.fit.fit(); } catch { /* hidden */ } if (xt.id && !xt.dead) shellPost('resize', { id: xt.id, cols: xt.term.cols, rows: xt.term.rows }); }, 80); }).observe($('#shellView'));
+  }
+  try { xt.fit.fit(); } catch { /* hidden */ }
+  if (fresh) { xt.id = null; xt.term.reset(); }
+  const r = await shellPost('start', { id: xt.id, cols: xt.term.cols, rows: xt.term.rows });
+  if (!r.ok) { xt.term.write('\r\ncould not start a shell\r\n'); return; }
+  const j = await r.json();
+  if (j.id !== xt.id) xt.term.reset();
+  xt.id = j.id; xt.dead = false; sessionStorage.setItem('ratchet.shell', j.id);
+  xt.es?.close();
+  xt.es = new EventSource(`/api/shell/stream?id=${encodeURIComponent(j.id)}&t=${encodeURIComponent(token)}`);
+  xt.es.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (msg.d) xt.term.write(Uint8Array.from(atob(msg.d), (ch) => ch.charCodeAt(0)));
+    if (msg.exit) { xt.dead = true; xt.es.close(); xt.term.write(`\r\n\x1b[2m${msg.error ?? 'shell exited'}. Press Enter for a new shell.\x1b[0m\r\n`); }
+  };
+  xt.term.focus();
+}
+function setTermTab(tab) {
+  TT.tab = tab;
+  document.querySelectorAll('.ttabs button').forEach((b) => b.classList.toggle('on', b.dataset.tt === tab));
+  $('#consoleView').classList.toggle('on', tab === 'console');
+  $('#shellView').classList.toggle('on', tab === 'shell');
+  $('#tNewShell').hidden = tab !== 'shell';
+  if (tab === 'shell') shellConnect(false); else termIn.focus();
+}
+document.querySelectorAll('.ttabs button').forEach((b) => { b.onclick = () => setTermTab(b.dataset.tt); });
+$('#tNewShell').onclick = () => { if (xt.id) shellPost('kill', { id: xt.id }); shellConnect(true); };
+$('#tClear').onclick = () => { if (TT.tab === 'shell') xt.term?.clear(); else termOut.innerHTML = ''; };
+$('#tMax').onclick = () => { const m = $('main'); m.classList.toggle('termMax'); $('#tMax').textContent = m.classList.contains('termMax') ? 'restore' : 'expand'; setTimeout(() => { try { xt.fit?.fit(); } catch { /* hidden */ } }, 50); };
+(() => {
+  const split = $('#split'); const mainEl = $('main');
+  const saved = Number(localStorage.getItem('ratchet.split')); if (saved > 0.15 && saved < 0.85) mainEl.style.setProperty('--gfrac', saved);
+  const setFrac = (f) => { f = Math.min(0.85, Math.max(0.15, f)); mainEl.style.setProperty('--gfrac', f); localStorage.setItem('ratchet.split', f); };
+  split.addEventListener('pointerdown', (e) => {
+    split.setPointerCapture(e.pointerId);
+    const move = (ev) => { const r = mainEl.getBoundingClientRect(); setFrac((ev.clientY - r.top) / r.height); };
+    const up = () => { split.removeEventListener('pointermove', move); split.removeEventListener('pointerup', up); try { xt.fit?.fit(); } catch { /* hidden */ } };
+    split.addEventListener('pointermove', move); split.addEventListener('pointerup', up);
+  });
+  split.addEventListener('keydown', (e) => { const cur = Number(getComputedStyle(mainEl).getPropertyValue('--gfrac')) || 0.6; if (e.key === 'ArrowUp') setFrac(cur - 0.05); if (e.key === 'ArrowDown') setFrac(cur + 0.05); });
+})();
 
 // ---------- tabs ----------
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
@@ -121,6 +270,7 @@ function resetPanes() { $('#feed').innerHTML = ''; renderClaims(); renderReport(
 // ---------- renderers ----------
 function renderHeader() {
   $('#ws').textContent = S.settings.dir;
+  $('#tcwd').textContent = S.settings.dir;
   $('#mockChip').hidden = !S.settings.mock;
   const m = $('#modeChip'); m.textContent = S.settings.mode; m.classList.toggle('yolo', S.settings.mode === 'yolo');
 }

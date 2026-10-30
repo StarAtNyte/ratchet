@@ -181,3 +181,37 @@ button.ws { background: none; }
 .provider.claude b { color: var(--harness-claude); } .provider.codex b { color: var(--harness-codex); } .provider.antigravity b { color: var(--harness-antigravity); }
 .ok.big { margin-top: var(--space-sm); font-size: var(--text-sm); }
 .runbar button.stopRun { color: var(--color-bad); border-color: var(--color-bad); }
+
+/* terminal panel: console + real shell */
+main { grid-template-rows: minmax(0, calc((100% - 6px) * var(--gfrac, 0.58))) 6px minmax(0, 1fr); gap: 0; }
+main.termMax { --gfrac: 0.15; }
+.splitter { background: var(--color-rule); cursor: row-resize; position: relative; }
+.splitter::after { content: ""; position: absolute; left: 50%; top: 2px; width: 40px; height: 2px; margin-left: -20px; background: var(--color-rule-2); }
+.splitter:hover, .splitter:focus-visible { background: var(--color-accent-soft); outline: none; }
+#term { display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.termbar { display: flex; align-items: center; gap: var(--space-sm); padding: 0 var(--space-sm) 0 var(--space-xs); border-bottom: 1px solid var(--color-rule); background: var(--color-paper-3); min-height: 36px; }
+.ttabs { display: flex; gap: var(--space-2xs); align-self: stretch; }
+.ttabs button { font: var(--text-sm) var(--font-body); background: none; border: 0; border-bottom: 2px solid transparent; color: var(--color-muted); padding: 0 var(--space-sm); cursor: pointer; }
+.ttabs button:hover { color: var(--color-ink); }
+.ttabs button.on { color: var(--color-ink); border-bottom-color: var(--color-accent); }
+.tcwd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); font: var(--text-xs) var(--font-outlier); }
+.tacts { display: flex; gap: var(--space-2xs); }
+.tacts button { font: var(--text-xs) var(--font-body); background: none; color: var(--color-muted); border: 1px solid transparent; padding: var(--space-3xs) var(--space-xs); cursor: pointer; }
+.tacts button:hover { color: var(--color-ink); border-color: var(--color-rule); }
+.tview { display: none; flex: 1; min-height: 0; flex-direction: column; position: relative; }
+.tview.on { display: flex; }
+#termOut { font: var(--text-xs)/1.6 var(--font-outlier); }
+#termForm { gap: var(--space-sm); }
+.kbd { color: var(--color-muted); font: var(--text-xs) var(--font-body); white-space: nowrap; }
+#shellView { background: var(--color-paper-3); padding: var(--space-xs) 0 0 var(--space-sm); }
+#xterm { flex: 1; min-height: 0; }
+#xterm .xterm { height: 100%; }
+#xterm .xterm-viewport { background: var(--color-paper-3) !important; }
+.quick { display: flex; gap: var(--space-2xs); flex-wrap: wrap; padding: var(--space-2xs) var(--space-md); border-top: 1px solid var(--color-rule); }
+.chipBtn { font: var(--text-xs) var(--font-outlier); background: none; color: var(--color-muted); border: 1px solid var(--color-rule); padding: var(--space-3xs) var(--space-xs); cursor: pointer; }
+.chipBtn:hover { color: var(--color-ink); border-color: var(--color-accent); }
+#suggest { position: absolute; left: var(--space-md); right: var(--space-md); bottom: 84px; max-height: 260px; overflow-y: auto; z-index: var(--z-dropdown); background: var(--color-paper-2); border: 1px solid var(--color-rule-2); font: var(--text-xs) var(--font-outlier); }
+#suggest[hidden] { display: none; }
+.sg { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: var(--space-sm); padding: var(--space-2xs) var(--space-sm); cursor: pointer; align-items: baseline; }
+.sg b { color: var(--color-ink); font-weight: 500; } .sg .h { color: var(--color-cool); } .sg .d { color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.sg.on, .sg:hover { background: var(--color-accent-soft); }

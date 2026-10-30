@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { dirname, join, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { AccountPool, HOME } from './accounts.mjs';
 import { Swarm } from './swarm.mjs';
 import { Optimizer } from './optimizer.mjs';
@@ -13,7 +14,16 @@ const CLEAN = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]/g;
 const LOGIN_CMD = { claude: ['claude', ['auth', 'login']], codex: ['codex', ['login', '--device-auth']], antigravity: ['agy', ['--print=Reply with OK']] };
 import { execCommand, COMMANDS } from './commands.mjs';
 
-const UI = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
+const SRC = dirname(fileURLToPath(import.meta.url));
+const UI = join(SRC, '..', 'ui');
+const req = createRequire(import.meta.url);
+const pkgDir = (name) => { try { return dirname(req.resolve(`${name}/package.json`)); } catch { return null; } };
+// browser-side vendor files served straight from node_modules (no bundler)
+const VENDOR = {
+  '/vendor/xterm.js': ['@xterm/xterm', 'lib/xterm.js'],
+  '/vendor/xterm.css': ['@xterm/xterm', 'css/xterm.css'],
+  '/vendor/addon-fit.js': ['@xterm/addon-fit', 'lib/addon-fit.js'],
+};
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 const MAX_EVENTS = 4000;
 const STATE = join(HOME, 'state.json');
@@ -70,6 +80,27 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       a.authed = code === 0; pool.publish(a);
       emit({ kind: 'login', id: a.id, text: code === 0 ? 'signed in' : `sign-in ended (exit ${code})`, done: true, ok: code === 0 });
     });
+  };
+
+  // ---- real shell sessions (python pty bridge, streamed over SSE) ----
+  const shells = new Map();
+  let shellSeq = 0;
+  const startShell = (cols, rows) => {
+    const id = `sh${++shellSeq}`;
+    const p = spawn('python3', ['-I', '-u', join(SRC, 'ratchet_pty.py'), String(cols), String(rows)], { cwd: settings.dir, env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const sh = { id, p, buf: [], size: 0, clients: new Set(), alive: true };
+    const send = (obj) => { const line = `data: ${JSON.stringify(obj)}\n\n`; for (const c of sh.clients) c.write(line); };
+    const onData = (d) => {
+      const b64 = Buffer.from(d).toString('base64');
+      sh.buf.push(b64); sh.size += b64.length;
+      while (sh.size > 400000 && sh.buf.length > 1) sh.size -= sh.buf.shift().length;
+      send({ d: b64 });
+    };
+    p.stdout.on('data', onData); p.stderr.on('data', onData);
+    p.on('error', (e) => { sh.alive = false; send({ exit: true, error: `python3 is required for the shell tab: ${e.message}` }); });
+    p.on('close', () => { sh.alive = false; send({ exit: true }); setTimeout(() => shells.delete(id), 60000); });
+    shells.set(id, sh);
+    return sh;
   };
 
   const guard = (req, res) => {
@@ -133,6 +164,41 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       return;
     }
 
+    if (url.pathname === '/api/shell/stream') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      const sh = shells.get(url.searchParams.get('id') ?? '');
+      if (!sh) return void res.writeHead(404).end();
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+      for (const b of sh.buf) res.write(`data: ${JSON.stringify({ d: b })}\n\n`);
+      if (!sh.alive) res.write(`data: ${JSON.stringify({ exit: true })}\n\n`);
+      sh.clients.add(res);
+      const ka = setInterval(() => res.write(': ka\n\n'), 20000);
+      req.on('close', () => { clearInterval(ka); sh.clients.delete(res); });
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/shell/') && req.method === 'POST') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      let body = '';
+      for await (const c of req) { body += c; if (body.length > 1e6) return void res.writeHead(413).end(); }
+      let j = {};
+      try { j = JSON.parse(body || '{}'); } catch { return void res.writeHead(400).end(); }
+      const op = url.pathname.slice('/api/shell/'.length);
+      const clamp = (n, lo, hi, d) => (Number.isFinite(Number(n)) ? Math.min(hi, Math.max(lo, Math.floor(Number(n)))) : d);
+      if (op === 'start') {
+        const existing = j.id && shells.get(String(j.id));
+        const sh = existing?.alive ? existing : startShell(clamp(j.cols, 20, 400, 120), clamp(j.rows, 5, 200, 30));
+        return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: sh.id, cwd: settings.dir }));
+      }
+      const sh = shells.get(String(j.id ?? ''));
+      if (!sh?.alive) return void res.writeHead(404).end();
+      if (op === 'input') sh.p.stdin.write(String(j.data ?? ''));
+      else if (op === 'resize') sh.p.stdin.write(`\x00\x1fR${clamp(j.cols, 20, 400, 120)},${clamp(j.rows, 5, 200, 30)}\n`);
+      else if (op === 'kill') sh.p.kill('SIGTERM');
+      else return void res.writeHead(404).end();
+      return void res.writeHead(204).end();
+    }
+
     if (url.pathname === '/api/cmd' && req.method === 'POST') {
       if (!authed(req, url)) return void res.writeHead(401).end();
       let body = '';
@@ -144,6 +210,14 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       try { await execCommand(line, { say, swarm, pool, settings, optimizer, remember }); }
       catch (e) { say(`error: ${e.message}`, 'err'); }
       return;
+    }
+
+    if (VENDOR[url.pathname]) {
+      const [pkg, rel] = VENDOR[url.pathname];
+      const base = pkgDir(pkg);
+      if (!base) return void res.writeHead(404).end('vendor package missing');
+      res.writeHead(200, { 'content-type': `${MIME[extname(rel)] ?? 'text/plain'}; charset=utf-8`, 'cache-control': 'max-age=3600' });
+      return void res.end(readFileSync(join(base, rel)));
     }
 
     const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
@@ -164,6 +238,7 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
   say('type a research task and press enter, or "help"', 'dim');
   const shutdown = () => {
     swarm.stop('all'); server.close();
+    for (const sh of shells.values()) { try { sh.p.kill('SIGTERM'); } catch { /* gone */ } }
     for (const f of ['url', 'pid']) { try { if (f === 'url' && !readFileSync(join(HOME, 'url'), 'utf8').includes(token)) continue; rmSync(join(HOME, f), { force: true }); } catch { /* gone */ } }
     process.exit(0);
   };
