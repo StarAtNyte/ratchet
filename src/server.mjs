@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { AccountPool, HOME, codexIdentity } from './accounts.mjs';
 import { Swarm } from './swarm.mjs';
 import { Optimizer } from './optimizer.mjs';
+import { ForgeSwarm } from './forge.mjs';
 import { HARNESSES, mergeEnv } from './harness.mjs';
 const CLEAN = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]/g;
 const LOGIN_CMD = { claude: ['claude', ['auth', 'login']], codex: ['codex', ['login', '--device-auth']], antigravity: ['agy', ['--print=Reply with OK']] };
@@ -56,6 +57,7 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
   const pool = new AccountPool(emit, { mock });
   const swarm = new Swarm({ pool, emit, settings });
   const optimizer = new Optimizer(swarm);
+  const forge = new ForgeSwarm(swarm);
   const restored = swarm.restore();
   const say = (text, cls = '') => emit({ kind: 'term', text, cls });
 
@@ -244,7 +246,7 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       const controller = new AbortController();
       if (clientId) terminalCommands.set(clientId, controller);
       say(`❯ ${line}`, 'echo');
-      try { await execCommand(line, { say, swarm, pool, settings, optimizer, remember, signal: controller.signal }); }
+      try { await execCommand(line, { say, swarm, pool, settings, optimizer, forge, remember, signal: controller.signal }); }
       catch (e) { say(`error: ${e.message}`, 'err'); }
       finally { if (clientId && terminalCommands.get(clientId) === controller) terminalCommands.delete(clientId); }
       return void res.writeHead(204).end();

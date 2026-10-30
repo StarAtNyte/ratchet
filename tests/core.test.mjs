@@ -146,3 +146,24 @@ test('scheduler uses free accounts when preferred provider is busy', async () =>
   assert.equal(await swarm.acquire('codex', new AbortController().signal, () => {}), idle);
   assert.equal(idle.load, 1);
 });
+
+test('ForgeKernel wrapper runs separate campaigns and records their results', async () => {
+  const { ForgeSwarm } = await import('../src/forge.mjs');
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'ratchet-forge-'));
+  try {
+    for (const name of ['a', 'b']) { mkdirSync(join(root, name)); writeFileSync(join(root, name, 'task.toml'), '[task]'); }
+    const bin = join(root, 'fake-forge');
+    writeFileSync(bin, `#!${process.execPath}\nconst fs=require('fs'),p=require('path'); const [op,arg]=process.argv.slice(2); if(op==='new') { const d=p.join(process.env.FORGEKERNEL_RUNS_DIR,'campaign'); fs.mkdirSync(d,{recursive:true}); fs.writeFileSync(p.join(d,'run.json'),'{}'); } else if(op==='run') { fs.writeFileSync(p.join(arg,'report.md'),'tested result'); }\n`, { mode: 0o755 });
+    const events = []; let done;
+    const finished = new Promise((resolve) => { done = resolve; });
+    const sw = { settings: { dir: root }, emit: (e) => events.push(e), newRun: () => ({ id: 'r1', root, abort: new AbortController(), agents: new Map() }), end: (run, status) => { run.status = status; done(run); } };
+    const forge = new ForgeSwarm(sw, { binary: bin });
+    forge.start(['a', 'b']); const result = await finished;
+    assert.equal(result.status, 'done'); assert.match(readFileSync(join(root, 'REPORT.md'), 'utf8'), /tested result/);
+    assert.equal(events.filter((e) => e.kind === 'agent.end' && e.agentId.startsWith('forge') && e.ok).length, 2);
+    assert.throws(() => forge.start(['missing']), /No task.toml/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

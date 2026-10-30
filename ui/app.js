@@ -34,6 +34,7 @@ function say(text, cls = '') { stick(termOut, () => { const d = el('div', cls); 
 const CATALOG = [
   ['run', '<task>', 'launch a research swarm'],
   ['follow', '<instruction>', 'queue instructions for the active swarm'],
+  ['forge', 'check <task> | start <task> [task...]', 'launch ForgeKernel campaigns'],
   ['opt', 'init | start [goal] | apply', 'evolutionary optimise loop'],
   ['resume', '<run>', 're-run an interrupted research run'],
   ['stop', '[run|all]', 'stop a run'],
@@ -60,6 +61,7 @@ function argChoices(cmd, sub) {
   if (cmd === 'account') return sub === undefined ? ['add', 'login', 'probe', 'enable', 'disable', 'rm'] : sub === 'add' ? (S.harnesses ?? []) : accts;
   if (cmd === 'mode') return ['yolo', 'auto'];
   if (cmd === 'set') return sub === undefined ? ['slots', 'workers', 'timeout', 'rounds'] : [];
+  if (cmd === 'forge') return sub === undefined ? ['check', 'start'] : [];
   if (cmd === 'opt') return sub === undefined ? ['init', 'start', 'apply'] : [];
   if (cmd === 'dir') return sub === undefined ? ['recent', 'mk', ...(S.settings.recent ?? [])] : [];
   return [];

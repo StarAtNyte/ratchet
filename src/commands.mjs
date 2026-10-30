@@ -8,13 +8,14 @@ import { HARNESSES, mergeEnv } from './harness.mjs';
 import { TEMPLATE } from './optimizer.mjs';
 import { writeFileSync } from 'node:fs';
 
-export const COMMANDS = ['help', 'run', 'follow', 'resume', 'opt', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
+export const COMMANDS = ['help', 'run', 'follow', 'resume', 'opt', 'forge', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
 
 const HELP = [
   ['run <task>', 'launch a research swarm'],
   ['follow <instruction>', 'queue an instruction for the active swarm’s next agent turns'],
   ['cd [path]', 'change the current workspace directory'],
   ['<command>', 'run a non-interactive shell command in the workspace'],
+  ['forge check <task> | start <task> [task...]', 'check or launch ForgeKernel campaigns'],
   ['opt init|start [goal]|apply', 'evolutionary optimise loop on ratchet.json (archive, ratchet, holdout)'],
   ['dir [path|n]', 'show/change workspace (also: click the path in the header); dir recent, dir mk <path>'],
   ['accounts', 'list the account pool'],
@@ -33,7 +34,7 @@ const HELP = [
 ];
 
 /** Execute one terminal line. `say(text, cls)` writes to the web terminal. */
-export async function execCommand(line, { say, swarm, pool, settings, optimizer, remember, signal }) {
+export async function execCommand(line, { say, swarm, pool, settings, optimizer, forge, remember, signal }) {
   const text = line.trim();
   if (!text) return;
   const [cmd, ...rest] = text.split(/\s+/);
@@ -46,6 +47,13 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
 
     case 'clear':
       return;
+
+    case 'forge': {
+      const [sub, ...tasks] = rest;
+      if (!forge || !tasks.length || !['start', 'check'].includes(sub) || (sub === 'check' && tasks.length !== 1)) return say('usage: forge check <task> | forge start <task> [task...]', 'err');
+      if (sub === 'check') { const result = await forge.check(tasks[0], settings.dir); return say(result.ok ? result.output : result.error, result.ok ? 'ok' : 'err'); }
+      try { const run = forge.start(tasks); return say(`ForgeKernel swarm ${run.id} launched with ${tasks.length} campaign(s).`, 'ok'); } catch (e) { return say(e.message, 'err'); }
+    }
 
     case 'opt': {
       const [sub, ...g] = rest;

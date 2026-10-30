@@ -231,3 +231,14 @@ In priority order. Each item is scoped so it can be built and checked on its own
 ## Prior art
 
 [karpathy/autoresearch](https://github.com/karpathy/autoresearch) for the keep-or-discard experiment loop, [AlphaEvolve](https://arxiv.org/abs/2506.13131) for the program database and model ensemble, and [KernelEvolve](https://arxiv.org/abs/2512.23236) for graph search with retrieval-augmented context.
+
+## ForgeKernel campaigns
+
+Ratchet can wrap independent ForgeKernel task directories in a single swarm. Install ForgeKernel and set `RATCHET_FORGE_BIN` to its `forge` executable, or install it at `~/.ratchet/forgekernel-venv/bin/forge`. Configure ForgeKernel's GPU delivery, provider credentials, and each task according to its own documentation before starting a campaign.
+
+```
+forge check /path/to/task
+forge start /path/to/task-a /path/to/task-b
+```
+
+`forge check` runs ForgeKernel's dry run. `forge start` creates one independent ForgeKernel campaign per task and streams each campaign's output into the graph and activity feed. Run artifacts and reports live under the Ratchet run's `forge/` directory. `stop all` requests termination of the local ForgeKernel processes. ForgeKernel uses its own provider/model configuration and GPU locking; Ratchet account-pool settings do not apply to its internal agents. Remote job termination, Modal GPU delivery and benchmark isolation across separate GPU hosts require additional integration and have not been verified.
