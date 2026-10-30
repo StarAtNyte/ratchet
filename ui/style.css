@@ -216,3 +216,16 @@ main.termMax { --gfrac: 0.15; }
 .sg b { color: var(--color-ink); font-weight: 500; } .sg .h { color: var(--color-cool); } .sg .d { color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .sg.on, .sg:hover { background: var(--color-accent-soft); }
 .kbd kbd { font: var(--text-xs) var(--font-outlier); border: 1px solid var(--color-rule); padding: 0 var(--space-2xs); margin: 0 var(--space-2xs) 0 var(--space-xs); color: var(--color-ink-2); }
+
+/* graph chrome */
+.overview { position: absolute; top: 44px; left: var(--space-md); right: var(--space-md); z-index: var(--z-raised); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-lg); padding: var(--space-xs) var(--space-sm); background: color-mix(in oklab, var(--color-paper-2) 88%, transparent); border: 1px solid var(--color-rule); pointer-events: none; }
+.overview[hidden] { display: none; }
+.ovTask { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; flex: 1 1 260px; }
+.ovTask b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ovStats { display: flex; flex-wrap: wrap; gap: var(--space-md); margin: 0; }
+.ovStats div { display: flex; flex-direction: column; } .ovStats dt { color: var(--color-muted); font-size: var(--text-xs); } .ovStats dd { margin: 0; font: var(--text-sm) var(--font-outlier); }
+.okc { color: var(--color-ok); } .unc { color: var(--color-accent); } .badc { color: var(--color-bad); }
+.gtools { position: absolute; right: var(--space-md); bottom: var(--space-sm); display: flex; gap: 1px; z-index: var(--z-raised); background: var(--color-rule); border: 1px solid var(--color-rule); }
+.gtools button { font: var(--text-xs) var(--font-body); background: var(--color-paper-2); color: var(--color-muted); border: 0; padding: var(--space-2xs) var(--space-sm); cursor: pointer; min-width: 32px; }
+.gtools button:hover { color: var(--color-ink); } .gtools button.on { color: var(--color-accent); }
+#graph:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }

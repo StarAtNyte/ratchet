@@ -40,6 +40,8 @@
   <main>
     <section id="graphWrap">
       <div class="runbar" id="runbar"></div>
+      <div class="overview" id="overview" hidden></div>
+      <div class="gtools" role="toolbar" aria-label="Graph view"><button type="button" id="gFit" title="Fit everything (double-click the graph or press F)">fit</button><button type="button" id="gOut" title="Zoom out">−</button><button type="button" id="gIn" title="Zoom in">+</button><button type="button" id="gLayout" title="Switch layout">tree</button></div>
       <canvas id="graph" aria-label="Agent swarm graph: each node is an agent, edges show who spawned whom"></canvas>
       <div class="legend"><span><i class="c-claude"></i>claude</span><span><i class="c-codex"></i>codex</span><span><i class="c-antigravity"></i>antigravity</span><span><i class="c-bad"></i>failed</span></div>
       <div class="empty" id="graphEmpty">

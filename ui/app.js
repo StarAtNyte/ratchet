@@ -229,7 +229,7 @@ function apply(ev) {
       break;
     }
     case 'account.remove': S.accounts.delete(ev.id); renderAccounts(); break;
-    case 'run.start': { const r = run(ev.runId); r.task = ev.task; S.current = ev.runId; S.focus = null; resetPanes(); renderRunbar(); break; }
+    case 'run.start': { const r = run(ev.runId); r.task = ev.task; r.startedAt = ev.t; S.current = ev.runId; S.focus = null; resetPanes(); renderRunbar(); break; }
     case 'agent.start': { const r = run(ev.runId); r.agents.set(ev.id, { id: ev.id, role: ev.role, title: ev.title, parent: ev.parent, harness: null, account: null, status: 'queued', born: ev.t, prompt: ev.prompt, failovers: 0, attempts: [] }); renderRunbar(); break; }
     case 'agent.assign': { const a = run(ev.runId).agents.get(ev.agentId); if (a) { Object.assign(a, { harness: ev.harness, account: ev.account, status: 'running', pulse: ev.t, startedAt: a.startedAt ?? ev.t }); (a.attempts ??= []).push(ev.account); } break; }
     case 'agent.failover': { const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.status = 'queued'; a.flash = ev.t; a.failovers = (a.failovers ?? 0) + 1; } break; }
@@ -260,9 +260,9 @@ function apply(ev) {
       break;
     }
     case 'run.report': { const r = run(ev.runId); r.report = ev.markdown; if (ev.runId === S.current) renderReport(); break; }
-    case 'run.end': { const r = run(ev.runId); r.status = ev.status; if (ev.note) say(`run ${ev.runId} ${ev.status}: ${ev.note}`, 'err'); else say(`run ${ev.runId} ${ev.status}`, ev.status === 'done' ? 'ok' : 'warn'); renderRunbar(); break; }
+    case 'run.end': { const r = run(ev.runId); r.status = ev.status; r.endedAt = ev.t; if (ev.note) say(`run ${ev.runId} ${ev.status}: ${ev.note}`, 'err'); else say(`run ${ev.runId} ${ev.status}`, ev.status === 'done' ? 'ok' : 'warn'); renderRunbar(); break; }
   }
-  renderStats(); scheduleLists();
+  renderStats(); scheduleLists(); if (ev.runId === S.current || ev.kind === 'account') renderOverview();
 }
 
 function resetPanes() { $('#feed').innerHTML = ''; renderClaims(); renderReport(); $('#focus').hidden = true; }
@@ -384,126 +384,226 @@ function renderReport() {
 let gearDeg = 0;
 function clickGear() { gearDeg += 30; $('#gearRot').style.transform = `rotate(${gearDeg}deg)`; }
 
-// ---------- swarm graph ----------
+// ---------- swarm graph: world-space layout, zoom, pan, fit ----------
 const cv = $('#graph'); const ctx = cv.getContext('2d');
 let W = 0; let H = 0; const nodes = new Map(); let hover = null;
-function resize() { const r = cv.getBoundingClientRect(); const d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d; ctx.setTransform(d, 0, 0, d, 0, 0); W = r.width; H = r.height; }
+const view = { k: 1, x: 0, y: 0, auto: true };
+const G = { layout: localStorage.getItem('ratchet.layout') || 'radial' };
+function resize() { const r = cv.getBoundingClientRect(); const d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d; W = r.width; H = r.height; }
 new ResizeObserver(resize).observe(cv); resize();
 
-function targets(r) {
-  const cx = W / 2; const cy = H / 2 + 6; const m = Math.min(W, H);
-  const out = new Map(); out.set('lead', { x: cx, y: cy, ang: 0 });
+function kidsOf(r) {
   const kids = new Map();
-  for (const a of r.agents.values()) { if (a.id === 'lead') continue; const p = a.parent ?? 'lead'; if (!kids.has(p)) kids.set(p, []); kids.get(p).push(a); }
+  for (const a of r.agents.values()) { if (a.id === 'lead') continue; const p = r.agents.has(a.parent) ? a.parent : 'lead'; if (!kids.has(p)) kids.set(p, []); kids.get(p).push(a); }
+  return kids;
+}
+function targets(r) {
+  const out = new Map(); out.set('lead', { x: 0, y: 0 });
+  const kids = kidsOf(r);
+  if (G.layout === 'tree') {
+    // layered left to right: depth is the column, leaves get consecutive rows
+    let row = 0;
+    const walk = (id, depth) => {
+      const ks = (kids.get(id) ?? []);
+      if (!ks.length) { out.set(id, { x: depth * 230, y: row++ * 58 }); return; }
+      ks.forEach((k) => walk(k.id, depth + 1));
+      const ys = ks.map((k) => out.get(k.id).y);
+      out.set(id, { x: depth * 230, y: (Math.min(...ys) + Math.max(...ys)) / 2 });
+    };
+    walk('lead', 0);
+    return out;
+  }
   const place = (pid, base, R, spread) => {
     const ks = (kids.get(pid) ?? []).filter((k) => k.id !== 'synth');
     ks.forEach((k, i) => {
       const ang = pid === 'lead' ? (i / ks.length) * Math.PI * 2 - Math.PI / 2 : base + (ks.length === 1 ? 0 : (i / (ks.length - 1) - 0.5) * spread);
       const pt = out.get(pid);
-      const rr = pid === 'lead' ? m * 0.27 : R;
-      out.set(k.id, { x: pt.x + Math.cos(ang) * rr, y: pt.y + Math.sin(ang) * rr * (pid === 'lead' ? 0.92 : 1), ang });
-      place(k.id, ang, m * 0.13, 1.1);
+      const rr = pid === 'lead' ? Math.max(220, ks.length * 34) : R;
+      out.set(k.id, { x: pt.x + Math.cos(ang) * rr, y: pt.y + Math.sin(ang) * rr });
+      place(k.id, ang, 110, Math.min(1.4, 0.35 * ((kids.get(k.id) ?? []).length + 1)));
     });
   };
   place('lead', 0, 0, 0);
-  if (r.agents.has('synth')) out.set('synth', { x: cx, y: cy + m * 0.15, ang: Math.PI / 2 });
+  if (r.agents.has('synth')) out.set('synth', { x: 0, y: 92 });
   return out;
 }
+function bbox(tg) {
+  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+  for (const p of tg.values()) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+  const padR = G.layout === 'tree' ? 200 : 70;
+  return { x0: x0 - 70, y0: y0 - 60, x1: x1 + padR, y1: y1 + 70 };
+}
+function fitTo(b, snap) {
+  const top = 70; const bottom = 40; // room for the run strip and legend
+  const k = Math.min(1.6, Math.max(0.15, Math.min(W / (b.x1 - b.x0), (H - top - bottom) / (b.y1 - b.y0))));
+  const x = W / 2 - ((b.x0 + b.x1) / 2) * k; const y = top + (H - top - bottom) / 2 - ((b.y0 + b.y1) / 2) * k;
+  if (snap) Object.assign(view, { k, x, y }); else { view.k += (k - view.k) * 0.12; view.x += (x - view.x) * 0.12; view.y += (y - view.y) * 0.12; }
+}
+const toWorld = (sx, sy) => ({ x: (sx - view.x) / view.k, y: (sy - view.y) / view.k });
 
 const tmp = new Map();
+let lastTg = null;
 function frame(t) {
   requestAnimationFrame(frame);
+  const d = devicePixelRatio || 1;
+  ctx.setTransform(d, 0, 0, d, 0, 0);
   ctx.clearRect(0, 0, W, H);
   const r = cur();
-  const cx = W / 2; const cy = H / 2 + 6; const m = Math.min(W, H);
-  // instrument-dial backdrop: hairline rings, degree ticks, and a slowly turning ratchet wheel
-  ctx.lineWidth = 1; ctx.strokeStyle = tint(COLORS.muted, 14);
-  [0.13, 0.27, 0.4].forEach((k) => { ctx.beginPath(); ctx.arc(cx, cy, m * k, 0, 7); ctx.stroke(); });
-  for (let i = 0; i < 72; i++) { const an = (i / 72) * Math.PI * 2; const r0 = m * 0.4; const r1 = r0 + (i % 6 === 0 ? 9 : 4); ctx.beginPath(); ctx.moveTo(cx + Math.cos(an) * r0, cy + Math.sin(an) * r0); ctx.lineTo(cx + Math.cos(an) * r1, cy + Math.sin(an) * r1); ctx.stroke(); }
-  ctx.strokeStyle = tint(COLORS.accent, 20); ctx.beginPath();
+  const tg = r ? targets(r) : new Map([['lead', { x: 0, y: 0 }]]);
+  lastTg = tg;
+  if (view.auto) fitTo(bbox(tg), false);
+  ctx.setTransform(d * view.k, 0, 0, d * view.k, d * view.x, d * view.y);
+
+  // instrument-dial backdrop around the lead, in world space
+  const lead = tg.get('lead');
+  ctx.lineWidth = 1 / view.k; ctx.strokeStyle = tint(COLORS.muted, 12);
+  if (G.layout === 'radial') {
+    [110, 220, 330].forEach((rr) => { ctx.beginPath(); ctx.arc(lead.x, lead.y, rr, 0, 7); ctx.stroke(); });
+    for (let i = 0; i < 72; i++) { const an = (i / 72) * Math.PI * 2; const r0 = 330; const r1 = r0 + (i % 6 === 0 ? 10 : 4); ctx.beginPath(); ctx.moveTo(lead.x + Math.cos(an) * r0, lead.y + Math.sin(an) * r0); ctx.lineTo(lead.x + Math.cos(an) * r1, lead.y + Math.sin(an) * r1); ctx.stroke(); }
+  }
+  ctx.strokeStyle = tint(COLORS.accent, 22); ctx.beginPath();
   const teeth = 28; const rot = t / 60000;
   for (let i = 0; i < teeth; i++) {
     const a0 = rot + (i / teeth) * Math.PI * 2; const a1 = a0 + (0.8 / teeth) * Math.PI * 2; const a2 = a0 + (1 / teeth) * Math.PI * 2;
-    const ri = m * 0.085; const ro = m * 0.105;
-    if (i === 0) ctx.moveTo(cx + Math.cos(a0) * ri, cy + Math.sin(a0) * ri);
-    ctx.lineTo(cx + Math.cos(a1) * ro, cy + Math.sin(a1) * ro); ctx.lineTo(cx + Math.cos(a1) * ri, cy + Math.sin(a1) * ri); ctx.lineTo(cx + Math.cos(a2) * ri, cy + Math.sin(a2) * ri);
+    const ri = 34; const ro = 44;
+    if (i === 0) ctx.moveTo(lead.x + Math.cos(a0) * ri, lead.y + Math.sin(a0) * ri);
+    ctx.lineTo(lead.x + Math.cos(a1) * ro, lead.y + Math.sin(a1) * ro); ctx.lineTo(lead.x + Math.cos(a1) * ri, lead.y + Math.sin(a1) * ri); ctx.lineTo(lead.x + Math.cos(a2) * ri, lead.y + Math.sin(a2) * ri);
   }
   ctx.closePath(); ctx.stroke();
   if (!r) return;
 
-  const sc = [...r.agents.values()].filter((a) => a.score != null && Number.isFinite(a.score) && a.ok !== false).sort((x, y) => (parseInt(x.id.slice(1)) || 0) - (parseInt(y.id.slice(1)) || 0));
-  if (sc.length > 1) {
-    const vals = sc.map((a) => a.score); const asc = vals[vals.length - 1] >= vals[0];
-    let best = vals[0]; const curve = vals.map((v) => (best = asc ? Math.max(best, v) : Math.min(best, v)));
-    const lo = Math.min(...vals); const hi = Math.max(...vals); const bx = W - 190; const by = H - 70; const bw = 170; const bh = 48;
-    ctx.fillStyle = COLORS.paper; ctx.strokeStyle = COLORS.rule; ctx.beginPath(); ctx.rect(bx - 10, by - 22, bw + 20, bh + 34); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = COLORS.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`best ${curve[curve.length - 1].toFixed(3)} · ${sc.length} tries`, bx, by - 8);
-    const X = (i) => bx + (i / (curve.length - 1)) * bw; const Y = (v) => by + bh - ((v - lo) / (hi - lo || 1)) * bh;
-    ctx.strokeStyle = tint(COLORS.muted, 40); ctx.lineWidth = 1; ctx.beginPath(); vals.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
-    ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.8; ctx.beginPath(); curve.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
-  }
-  const tg = targets(r);
   for (const a of r.agents.values()) {
     const tp = tg.get(a.id); if (!tp) continue;
     let n = nodes.get(`${r.id}/${a.id}`);
-    if (!n) { const pp = nodes.get(`${r.id}/${a.parent ?? 'lead'}`); n = { x: pp?.x ?? cx, y: pp?.y ?? cy, vx: 0, vy: 0, seed: Math.random() * 9 }; nodes.set(`${r.id}/${a.id}`, n); }
-    n.vx = (n.vx + (tp.x + Math.sin(t / 900 + n.seed) * 4 - n.x) * 0.05) * 0.82;
-    n.vy = (n.vy + (tp.y + Math.cos(t / 1100 + n.seed) * 4 - n.y) * 0.05) * 0.82;
+    if (!n) { const pp = nodes.get(`${r.id}/${a.parent ?? 'lead'}`); n = { x: pp?.x ?? tp.x, y: pp?.y ?? tp.y, vx: 0, vy: 0, seed: Math.random() * 9 }; nodes.set(`${r.id}/${a.id}`, n); }
+    n.vx = (n.vx + (tp.x - n.x) * 0.08) * 0.78;
+    n.vy = (n.vy + (tp.y - n.y) * 0.08) * 0.78;
     n.x += n.vx; n.y += n.vy; n.a = a;
   }
   const N = (id) => nodes.get(`${r.id}/${id}`);
 
-  // edges + particles
+  // edges
   for (const a of r.agents.values()) {
     if (a.id === 'lead') continue;
-    const n = N(a.id); const p = N(a.parent ?? 'lead'); if (!n || !p) continue;
+    const n = N(a.id); const p = N(r.agents.has(a.parent) ? a.parent : 'lead'); if (!n || !p) continue;
     const col = COLORS[harnessOf(a)] ?? COLORS.none;
-    const mx = (n.x + p.x) / 2 + (n.y - p.y) * 0.12; const my = (n.y + p.y) / 2 - (n.x - p.x) * 0.12;
-    ctx.strokeStyle = a.status === 'failed' ? tint(COLORS.bad, 40) : a.status === 'done' ? tint(col, 35) : tint(col, 20);
-    ctx.lineWidth = a.status === 'running' ? 1.6 : 1;
-    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.quadraticCurveTo(mx, my, n.x, n.y); ctx.stroke();
-    if (a.status === 'running') { ctx.setLineDash([4, 6]); ctx.lineDashOffset = -t / 40; ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.quadraticCurveTo(mx, my, n.x, n.y); ctx.stroke(); ctx.setLineDash([]); }
+    ctx.strokeStyle = a.status === 'failed' ? tint(COLORS.bad, 40) : a.status === 'done' ? tint(col, 40) : tint(col, 22);
+    ctx.lineWidth = (a.status === 'running' ? 1.6 : 1) / Math.sqrt(view.k);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y);
+    if (G.layout === 'tree') { const mx = (p.x + n.x) / 2; ctx.bezierCurveTo(mx, p.y, mx, n.y, n.x, n.y); }
+    else { const mx = (n.x + p.x) / 2 + (n.y - p.y) * 0.1; const my = (n.y + p.y) / 2 - (n.x - p.x) * 0.1; ctx.quadraticCurveTo(mx, my, n.x, n.y); }
+    ctx.stroke();
+    if (a.status === 'running') { ctx.setLineDash([4, 6]); ctx.lineDashOffset = -t / 40; ctx.strokeStyle = col; ctx.stroke(); ctx.setLineDash([]); }
   }
 
   // nodes
   hover = null;
+  const mw = toWorld(mouse.x, mouse.y);
   for (const a of r.agents.values()) {
     const n = N(a.id); if (!n) continue;
     const col = a.status === 'failed' ? COLORS.bad : COLORS[harnessOf(a)] ?? COLORS.none;
-    const base = a.role === 'lead' ? 18 : a.role === 'verify' ? 9 : a.role === 'sub' || a.role === 'cand' ? 8 : 12;
+    const base = a.role === 'lead' ? 16 : a.role === 'verify' ? 8 : a.role === 'sub' || a.role === 'cand' ? 8 : 11;
     const age = t - (tmp.get(`${r.id}/${a.id}`) ?? (tmp.set(`${r.id}/${a.id}`, t), t));
-    const pop = Math.min(1, age / 400); const rad = base * (0.4 + 0.6 * pop);
+    const zs = 1 / Math.sqrt(Math.max(view.k, 0.2)); // keep nodes legible when zoomed out
+    const rad = base * zs * (0.4 + 0.6 * Math.min(1, age / 400));
     if (a.status === 'running') {
       const k = (t / 900 + n.seed) % 1;
       ctx.strokeStyle = col; ctx.globalAlpha = (1 - k) * 0.5; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(n.x, n.y, rad + k * 12, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
     }
-    if (a.status === 'queued') { ctx.setLineDash([3, 4]); }
-        ctx.fillStyle = a.status === 'done' ? col : COLORS.paper; ctx.strokeStyle = col; ctx.lineWidth = 2;
+    if (a.status === 'queued') ctx.setLineDash([3, 4]);
+    ctx.fillStyle = a.status === 'done' ? col : COLORS.paper; ctx.strokeStyle = col; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(n.x, n.y, rad, 0, 7); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
     if (a.status === 'done') { ctx.strokeStyle = COLORS.paper; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(n.x - rad * 0.4, n.y); ctx.lineTo(n.x - rad * 0.1, n.y + rad * 0.35); ctx.lineTo(n.x + rad * 0.45, n.y - rad * 0.3); ctx.stroke(); }
-    if (a.status === 'failed') { ctx.strokeStyle = COLORS.bad; ctx.beginPath(); ctx.moveTo(n.x - 4, n.y - 4); ctx.lineTo(n.x + 4, n.y + 4); ctx.moveTo(n.x + 4, n.y - 4); ctx.lineTo(n.x - 4, n.y + 4); ctx.stroke(); }
+    if (a.status === 'failed') { ctx.strokeStyle = COLORS.bad; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(n.x - 4, n.y - 4); ctx.lineTo(n.x + 4, n.y + 4); ctx.moveTo(n.x + 4, n.y - 4); ctx.lineTo(n.x - 4, n.y + 4); ctx.stroke(); }
     const fl = Date.now() - (a.flash ?? 0); if (a.flash && fl < 600) { ctx.strokeStyle = COLORS.warn; ctx.globalAlpha = 1 - fl / 600; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(n.x, n.y, rad + 8 + fl / 40, 0, 7); ctx.stroke(); ctx.globalAlpha = 1; }
-    ctx.fillStyle = S.focus === a.id ? COLORS.lead : COLORS.muted; ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(a.id === 'lead' ? 'LEAD' : a.id, n.x, n.y + rad + 13);
-    if (a.score != null && Number.isFinite(a.score)) { ctx.fillStyle = a.champion ? COLORS.accent : COLORS.muted; ctx.font = '10px ui-sans-serif, system-ui, sans-serif'; ctx.fillText(Number(a.score).toFixed(3), n.x, n.y + rad + 35); }
-    if (a.champion) { ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(n.x, n.y, rad + 5, 0, 7); ctx.stroke(); ctx.fillStyle = COLORS.accent; ctx.beginPath(); ctx.moveTo(n.x, n.y - rad - 12); ctx.lineTo(n.x + 3.5, n.y - rad - 7); ctx.lineTo(n.x - 3.5, n.y - rad - 7); ctx.closePath(); ctx.fill(); }
-    if (a.account) { ctx.fillStyle = tint(col, 67); ctx.font = '10px ui-sans-serif, system-ui, sans-serif'; ctx.fillText(a.account, n.x, n.y + rad + 24); }
-    if (Math.hypot(mouse.x - n.x, mouse.y - n.y) < rad + 6) hover = a;
+    if (a.champion) { ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(n.x, n.y, rad + 5, 0, 7); ctx.stroke(); }
+    // labels: below in radial, to the right in tree; hidden when zoomed far out
+    if (view.k > 0.3 || a.role === 'lead') {
+      const name = a.id === 'lead' ? (r.task.startsWith('optimize') ? 'baseline' : 'lead') : a.id;
+      const score = a.score != null && Number.isFinite(a.score) ? Number(a.score).toFixed(3) : '';
+      const u = 1 / view.k; // one screen pixel in world units: text stays a fixed screen size
+      ctx.font = `${12 * u}px system-ui, sans-serif`;
+      if (G.layout === 'tree') {
+        ctx.textAlign = 'left'; ctx.fillStyle = S.focus === a.id ? COLORS.lead : COLORS.ink2;
+        ctx.fillText(a.id === 'lead' ? name : `${name}  ${(a.title ?? '').slice(0, 26)}`, n.x + rad + 8 * u, n.y - 2 * u);
+        ctx.font = `${10 * u}px system-ui, sans-serif`; ctx.fillStyle = tint(col, 75);
+        ctx.fillText([a.account ?? (a.id === 'lead' ? '' : 'waiting'), score].filter(Boolean).join('  '), n.x + rad + 8 * u, n.y + 11 * u);
+      } else {
+        ctx.textAlign = 'center'; ctx.fillStyle = S.focus === a.id ? COLORS.lead : COLORS.ink2;
+        ctx.fillText(name, n.x, n.y + rad + 14 * u);
+        ctx.font = `${10 * u}px system-ui, sans-serif`; ctx.fillStyle = tint(col, 75);
+        if (a.account) ctx.fillText(a.account, n.x, n.y + rad + 26 * u);
+        if (score) { ctx.fillStyle = a.champion ? COLORS.accent : COLORS.muted; ctx.fillText(score, n.x, n.y + rad + 38 * u); }
+      }
+    }
+    if (Math.hypot(mw.x - n.x, mw.y - n.y) < rad + 6 / view.k) hover = a;
   }
-  if (hover) {
-    const label = `${hover.title ?? hover.id}${hover.account ? '  ·  ' + hover.account : ''}  ·  ${hover.status}`;
-    ctx.font = '12px ui-sans-serif, system-ui, sans-serif'; const w = ctx.measureText(label).width + 16;
-    const x = Math.min(Math.max(mouse.x - w / 2, 6), W - w - 6); const y = mouse.y - 34;
-    ctx.fillStyle = COLORS.panel; ctx.strokeStyle = COLORS.rule; ctx.beginPath(); ctx.rect(x, y, w, 22); ctx.fill(); ctx.stroke();
+
+  // screen-space overlays: score curve and tooltip
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+  const sc = [...r.agents.values()].filter((a) => a.score != null && Number.isFinite(a.score) && a.ok !== false).sort((x, y) => (parseInt(x.id.slice(1)) || 0) - (parseInt(y.id.slice(1)) || 0));
+  if (sc.length > 1) {
+    const vals = sc.map((a) => a.score); const asc = vals[vals.length - 1] >= vals[0];
+    let best = vals[0]; const curve = vals.map((v) => (best = asc ? Math.max(best, v) : Math.min(best, v)));
+    const lo = Math.min(...vals); const hi = Math.max(...vals); const bx = W - 200; const by = H - 112; const bw = 180; const bh = 48;
+    ctx.fillStyle = COLORS.panel; ctx.strokeStyle = COLORS.rule; ctx.lineWidth = 1; ctx.beginPath(); ctx.rect(bx - 10, by - 24, bw + 20, bh + 36); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = COLORS.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`best ${curve[curve.length - 1].toFixed(3)} after ${sc.length} tries`, bx, by - 9);
+    const X = (i) => bx + (i / (curve.length - 1)) * bw; const Y = (v) => by + bh - ((v - lo) / (hi - lo || 1)) * bh;
+    ctx.strokeStyle = tint(COLORS.muted, 40); ctx.beginPath(); vals.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
+    ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.8; ctx.beginPath(); curve.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
+  }
+  if (hover && !drag.on) {
+    const label = `${hover.id}  ${hover.title ?? ''}${hover.account ? `  on ${hover.account}` : ''}  (${hover.status})`;
+    ctx.font = '12px system-ui, sans-serif'; const w = ctx.measureText(label).width + 16;
+    const x = Math.min(Math.max(mouse.x - w / 2, 6), W - w - 6); const y = Math.max(6, mouse.y - 36);
+    ctx.fillStyle = COLORS.panel; ctx.strokeStyle = COLORS.rule; ctx.lineWidth = 1; ctx.beginPath(); ctx.rect(x, y, w, 22); ctx.fill(); ctx.stroke();
     ctx.fillStyle = COLORS.lead; ctx.textAlign = 'left'; ctx.fillText(label, x + 8, y + 15);
   }
-  cv.style.cursor = hover ? 'pointer' : 'crosshair';
+  cv.style.cursor = drag.on ? 'grabbing' : hover ? 'pointer' : 'grab';
 }
 const mouse = { x: -99, y: -99 };
-cv.addEventListener('mousemove', (e) => { const r = cv.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; });
+const drag = { on: false, moved: false, sx: 0, sy: 0, vx: 0, vy: 0 };
+const zoomAt = (sx, sy, f) => { const w = toWorld(sx, sy); view.k = Math.min(3, Math.max(0.1, view.k * f)); view.x = sx - w.x * view.k; view.y = sy - w.y * view.k; view.auto = false; syncTools(); };
+cv.addEventListener('mousemove', (e) => {
+  const r = cv.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
+  if (drag.on) { const dx = e.clientX - drag.sx; const dy = e.clientY - drag.sy; if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true; view.x = drag.vx + dx; view.y = drag.vy + dy; view.auto = false; syncTools(); }
+});
+cv.addEventListener('mousedown', (e) => { if (e.button !== 0) return; Object.assign(drag, { on: true, moved: false, sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y }); });
+window.addEventListener('mouseup', () => { drag.on = false; });
 cv.addEventListener('mouseleave', () => { mouse.x = mouse.y = -99; });
-cv.addEventListener('click', () => { if (hover) openAgent(hover.id); });
+cv.addEventListener('click', () => { if (hover && !drag.moved) openAgent(hover.id); });
+cv.addEventListener('dblclick', () => { view.auto = true; syncTools(); });
+cv.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(mouse.x, mouse.y, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+function syncTools() {
+  $('#gFit').classList.toggle('on', view.auto);
+  $('#gLayout').textContent = G.layout === 'tree' ? 'radial' : 'tree';
+}
+$('#gFit').onclick = () => { view.auto = true; syncTools(); };
+$('#gIn').onclick = () => zoomAt(W / 2, H / 2, 1.25);
+$('#gOut').onclick = () => zoomAt(W / 2, H / 2, 0.8);
+$('#gLayout').onclick = () => { G.layout = G.layout === 'tree' ? 'radial' : 'tree'; localStorage.setItem('ratchet.layout', G.layout); view.auto = true; syncTools(); };
+cv.setAttribute('tabindex', '0');
+cv.addEventListener('keydown', (e) => { if (e.key === '+' || e.key === '=') zoomAt(W / 2, H / 2, 1.2); if (e.key === '-') zoomAt(W / 2, H / 2, 0.83); if (e.key === '0' || e.key === 'f') { view.auto = true; syncTools(); } });
+syncTools();
 requestAnimationFrame(frame);
+
+// ---------- run overview strip ----------
+const fmtAgo = (ms) => { const s = Math.floor(ms / 1000); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`; };
+function renderOverview() {
+  const box = $('#overview'); const r = cur();
+  if (!r) { box.hidden = true; return; }
+  box.hidden = false;
+  const ag = [...r.agents.values()];
+  const c = (st) => ag.filter((a) => a.status === st).length;
+  const cl = [...r.claims.values()];
+  const v = (x) => cl.filter((q) => q.verdict === x).length;
+  const elapsed = (r.endedAt ?? Date.now()) - (r.startedAt ?? Date.now());
+  const busy = [...S.accounts.values()].filter((a) => a.load > 0).map((a) => a.id);
+  box.innerHTML = `<div class="ovTask"><span class="pill ${r.status === 'running' ? 'running' : r.status === 'done' ? 'done' : r.status === 'failed' || r.status === 'interrupted' ? 'failed' : ''}">${esc(r.status)}</span><b title="${esc(r.task)}">${esc(r.task)}</b></div>
+    <dl class="ovStats"><div><dt>elapsed</dt><dd>${fmtAgo(elapsed)}</dd></div><div><dt>running</dt><dd>${c('running')}</dd></div><div><dt>waiting</dt><dd>${c('queued')}</dd></div><div><dt>done</dt><dd>${c('done')}</dd></div><div><dt>failed</dt><dd>${c('failed')}</dd></div>${cl.length ? `<div><dt>claims</dt><dd><span class="okc">${v('confirmed')}</span> / <span class="unc">${v('unclear') + v('pending')}</span> / <span class="badc">${v('refuted')}</span></dd></div>` : ''}<div><dt>busy accounts</dt><dd>${busy.length ? esc(busy.join(', ')) : 'none'}</dd></div></dl>`;
+}
+setInterval(renderOverview, 1000);
+
 
 // ---------- clock + connection ----------
 setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString([], { hour12: false }); tickCountdowns(); }, 1000);
