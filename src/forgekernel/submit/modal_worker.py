@@ -44,9 +44,7 @@ def main() -> int:
                     fh.write("#!/bin/sh\nexec " + shlex.quote(ncu) + " --clock-control none \"$@\"\n")
                 os.chmod(wrapper, 0o755)
                 job_env["PATH"] = bindir + os.pathsep + job_env.get("PATH", "")
-                # gpu_entry prepends CUDA/bin to PATH; an exported Bash
-                # function keeps the no-clock-control option when it does so.
-                job_env["BASH_FUNC_ncu%%"] = '() { command ' + shlex.quote(ncu) + ' --clock-control none "$@"; }'
+                job_env["FK_MODAL_NCU_BIN"] = bindir
             proc = subprocess.Popen(argv, cwd=tree, env=job_env,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     start_new_session=True)

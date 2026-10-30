@@ -819,6 +819,7 @@ set -euo pipefail
 SOL_ENV="${{SOL_ENV:-/opt/sol/env.sh}}"
 if [ -f "$SOL_ENV" ]; then set +u; source "$SOL_ENV"; set -u; fi
 export PATH=/usr/local/cuda/bin:${{PATH}}
+if [ -n "${{FK_MODAL_NCU_BIN:-}}" ]; then export PATH="${{FK_MODAL_NCU_BIN}}:${{PATH}}"; fi
 WORKSPACE="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 cd "$WORKSPACE"
 export PYTHONPATH="$WORKSPACE:$WORKSPACE/eval:${{PYTHONPATH:-}}"
