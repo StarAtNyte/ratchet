@@ -215,3 +215,4 @@ main.termMax { --gfrac: 0.15; }
 .sg { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: var(--space-sm); padding: var(--space-2xs) var(--space-sm); cursor: pointer; align-items: baseline; }
 .sg b { color: var(--color-ink); font-weight: 500; } .sg .h { color: var(--color-cool); } .sg .d { color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .sg.on, .sg:hover { background: var(--color-accent-soft); }
+.kbd kbd { font: var(--text-xs) var(--font-outlier); border: 1px solid var(--color-rule); padding: 0 var(--space-2xs); margin: 0 var(--space-2xs) 0 var(--space-xs); color: var(--color-ink-2); }
