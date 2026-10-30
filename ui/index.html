@@ -108,6 +108,19 @@
     </div>
   </div>
 </div>
+<div id="forgeModal" class="modal" hidden>
+  <div class="box forge-box" role="dialog" aria-modal="true" aria-labelledby="forgeTitle">
+    <div class="forge-head"><div><h3 id="forgeTitle">Kernel campaigns</h3><p class="muted2">Run independent ForgeKernel tasks and follow their progress in Ratchet.</p></div><button id="forgeClose" type="button" aria-label="Close kernel campaigns">Close</button></div>
+    <label class="forge-label" for="forgeTasks">Task directories <span>One path per line</span></label>
+    <textarea id="forgeTasks" rows="3" spellcheck="false" placeholder="/path/to/ForgeKernel/tasks/my-task"></textarea>
+    <label class="forge-label" for="forgeDevice">GPU delivery</label>
+    <select id="forgeDevice"><option value="configured">Use checkout configuration</option><option value="modal">Modal GPU</option><option value="local">Local GPU</option></select>
+    <div id="forgeDeviceField" hidden><label class="forge-label" for="forgeDeviceValue" id="forgeDeviceLabel">GPU type</label><input id="forgeDeviceValue" spellcheck="false" autocomplete="off"></div>
+    <p class="muted2">The checkout controls its agents, credentials, and GPU settings. Starting a campaign can use GPU and model credits.</p>
+    <pre id="forgeResult" class="dpre" role="status" hidden></pre>
+    <div class="actions"><span class="grow"></span><button type="button" id="forgeCheck">Check task</button><button type="button" class="primary" id="forgeStart">Start campaigns</button></div>
+  </div>
+</div>
 <div id="agentModal" class="modal" hidden>
   <div class="box">
     <h3>Add agent</h3>

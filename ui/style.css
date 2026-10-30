@@ -508,3 +508,14 @@ header button.ws { margin-right: auto; max-width: min(42vw, 480px); padding: 6px
 .command-reference-name { color: var(--color-accent); font: var(--text-xs) var(--font-outlier); }
 .command-reference-detail { color: var(--color-ink-2); font: var(--text-xs)/1.45 var(--font-body); }
 @media (max-width: 40rem) { #term .termbar { flex-wrap: wrap; } #term .tacts { gap: 2px; } #term .tacts button { padding-inline: 4px; } }
+.agents-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-xs); flex-shrink: 0; }
+.forge-box { width: min(580px, 94vw); overflow-y: auto; }
+.forge-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-md); }
+.forge-head p { margin-top: var(--space-xs); }
+.forge-label { display: flex; justify-content: space-between; gap: var(--space-sm); color: var(--color-ink-2); font-size: var(--text-sm); }
+.forge-label span { color: var(--color-muted); font-size: var(--text-xs); }
+#forgeTasks, #forgeDevice, #forgeDeviceValue { width: 100%; min-width: 0; border: 1px solid var(--color-rule); border-radius: var(--radius-pill); padding: var(--space-xs) var(--space-sm); background: var(--color-paper-3); color: var(--color-ink); }
+#forgeTasks, #forgeDeviceValue { font: var(--text-xs)/1.5 var(--font-outlier); }
+#forgeTasks { resize: vertical; }
+#forgeDeviceField:not([hidden]) { display: grid; gap: var(--space-xs); }
+#forgeResult { margin: 0; max-height: 180px; }

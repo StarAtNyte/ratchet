@@ -241,9 +241,13 @@ forge use /path/to/ForgeKernel
 forge status
 forge check /path/to/ForgeKernel/tasks/my-task
 forge start /path/to/ForgeKernel/tasks/my-task
+forge check --device modal:H200 /path/to/ForgeKernel/tasks/my-task
+forge start --device local:0 /path/to/ForgeKernel/tasks/my-task
 ```
 
 You can also pass the checkout's `src/forgekernel` directory to `forge use`. Ratchet saves the selected checkout locally in `~/.ratchet/forge.json`. `RATCHET_FORGE_BIN` overrides the saved selection; without either, Ratchet uses `~/.ratchet/forgekernel-venv/bin/forge`.
+
+Use the **Kernel** button in the Agents panel to choose task directories and GPU delivery. The default is the checkout configuration; select a Modal GPU type or local CUDA device to override it for one campaign. The terminal supports `--device modal:<type>` and `--device local:<index>` after `check` or `start`.
 
 `forge check` runs ForgeKernel's dry run. `forge start` accepts multiple space-separated task directories and launches one independent campaign for each. Output appears in the graph and Activity; artifacts and reports are saved under the Ratchet run's `forge/` directory. Each ForgeKernel checkout supplies its own GPU delivery, model, and provider configuration. Ratchet's account pool and model settings do not control ForgeKernel's internal agents.
 

@@ -49,13 +49,15 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
       return;
 
     case 'forge': {
-      const [sub, ...tasks] = rest;
+      const [sub, ...args] = rest;
+      let tasks = args; let device = null;
+      if (args[0] === '--device') { device = args[1]; tasks = args.slice(2); if (!device) return say('usage: --device modal:<GPU> | local:<index>', 'err'); }
       if (!forge) return say('ForgeKernel integration is unavailable.', 'err');
       if (sub === 'status' && !tasks.length) return say(`ForgeKernel executable: ${forge.binary}${forge.checkout ? ` · checkout: ${forge.checkout}` : ''}`, 'dim');
       if (sub === 'use' && tasks.length) { try { const result = await forge.use(tasks.join(' '), settings.dir); return say(`Using ${result.version} from ${result.checkout}`, 'ok'); } catch (e) { return say(e.message, 'err'); } }
       if (!tasks.length || !['start', 'check'].includes(sub)) return say('usage: forge use <checkout> | status | check <task> | start <task> [task...]', 'err');
-      if (sub === 'check') { const result = await forge.check(tasks.join(' '), settings.dir); return say(result.ok ? result.output : result.error, result.ok ? 'ok' : 'err'); }
-      try { const run = forge.start(tasks); return say(`ForgeKernel swarm ${run.id} launched with ${tasks.length} campaign(s).`, 'ok'); } catch (e) { return say(e.message, 'err'); }
+      if (sub === 'check') { try { const result = await forge.check(tasks.join(' '), settings.dir, device); return say(result.ok ? result.output : result.error, result.ok ? 'ok' : 'err'); } catch (e) { return say(e.message, 'err'); } }
+      try { const run = forge.start(tasks, device); return say(`ForgeKernel swarm ${run.id} launched with ${tasks.length} campaign(s).`, 'ok'); } catch (e) { return say(e.message, 'err'); }
     }
 
     case 'opt': {

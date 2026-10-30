@@ -184,3 +184,23 @@ test('ForgeKernel checkout selection accepts source path and persists the execut
     await assert.rejects(forge.use(join(root, 'missing'), root), /Not a ForgeKernel checkout/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('ForgeKernel device selection uses checkout defaults or explicit validated overrides', async () => {
+  const { deviceEnv } = await import('../src/forge.mjs');
+  assert.deepEqual(deviceEnv(null), {});
+  assert.deepEqual(deviceEnv('configured'), {});
+  assert.deepEqual(deviceEnv('modal:B200'), { FK_DELIVERY: 'modal', FK_MODAL_GPU: 'B200' });
+  assert.deepEqual(deviceEnv('local:1'), { FK_DELIVERY: 'local', FK_GPU: '1' });
+  assert.throws(() => deviceEnv('modal:'), /Device must/);
+  assert.throws(() => deviceEnv('local:bad'), /Device must/);
+});
+
+test('forge terminal commands pass the selected device to campaigns', async () => {
+  const { execCommand } = await import('../src/commands.mjs');
+  const calls = []; const output = [];
+  const forge = { check: async (...args) => { calls.push(['check', ...args]); return { ok: true, output: 'ready' }; }, start: (...args) => { calls.push(['start', ...args]); return { id: 'r1' }; } };
+  const ctx = { forge, settings: { dir: '/workspace' }, say: (s) => output.push(s) };
+  await execCommand('forge check --device modal:B200 /tasks/a', ctx);
+  await execCommand('forge start --device local:1 /tasks/a /tasks/b', ctx);
+  assert.deepEqual(calls, [['check', '/tasks/a', '/workspace', 'modal:B200'], ['start', ['/tasks/a', '/tasks/b'], 'local:1']]);
+});

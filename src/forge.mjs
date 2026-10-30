@@ -4,6 +4,16 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { HOME } from './accounts.mjs';
 
+// Explicit overrides affect one campaign only; omitted means the checkout's configuration.
+export function deviceEnv(device) {
+  if (!device || device === 'configured') return {};
+  const [delivery, value, ...extra] = String(device).split(':');
+  if (extra.length || !value) throw new Error('Device must be configured, modal:<GPU type>, or local:<device index>.');
+  if (delivery === 'modal' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value)) return { FK_DELIVERY: 'modal', FK_MODAL_GPU: value };
+  if (delivery === 'local' && /^\d{1,4}$/.test(value)) return { FK_DELIVERY: 'local', FK_GPU: value };
+  throw new Error('Device must be configured, modal:<GPU type>, or local:<device index>.');
+}
+
 export class ForgeSwarm {
   constructor(swarm, { binary, configFile = join(HOME, 'forge.json') } = {}) {
     this.swarm = swarm;
@@ -54,23 +64,24 @@ export class ForgeSwarm {
     });
   }
 
-  async check(task, cwd) {
+  async check(task, cwd, device = null) {
     const path = String(task).replace(/^~(?=$|\/)/, homedir());
-    return this.command(['new', resolve(cwd, path), '--dry-run'], { cwd });
+    return this.command(['new', resolve(cwd, path), '--dry-run'], { cwd, env: deviceEnv(device) });
   }
 
-  start(tasks) {
+  start(tasks, device = null) {
     const cwd = this.swarm.settings.dir;
+    const overrides = deviceEnv(device);
     if (!tasks.length) throw new Error('Usage: forge start <task-directory> [task-directory ...]');
     if (tasks.length > 12) throw new Error('At most 12 ForgeKernel campaigns can be started together.');
     const paths = tasks.map((task) => resolve(cwd, String(task).replace(/^~(?=$|\/)/, homedir())));
     for (const task of paths) if (!existsSync(join(task, 'task.toml'))) throw new Error(`No task.toml in ${task}`);
     const run = this.swarm.newRun(`ForgeKernel: ${paths.map((path) => basename(path)).join(', ')}`, 'forge');
-    this.drive(run, paths, cwd).catch((error) => this.swarm.end(run, 'failed', error.message));
+    this.drive(run, paths, cwd, overrides).catch((error) => this.swarm.end(run, 'failed', error.message));
     return run;
   }
 
-  async drive(run, tasks, cwd) {
+  async drive(run, tasks, cwd, overrides = {}) {
     const sw = this.swarm;
     sw.emit({ kind: 'agent.start', runId: run.id, id: 'lead', role: 'lead', title: 'ForgeKernel campaigns', parent: null });
     run.agents.set('lead', { id: 'lead', role: 'lead', title: 'ForgeKernel campaigns' });
@@ -82,7 +93,7 @@ export class ForgeSwarm {
       sw.emit({ kind: 'agent.start', runId: run.id, id, role: 'worker', title, parent: 'lead' });
       sw.emit({ kind: 'agent.assign', runId: run.id, agentId: id, harness: 'forge', account: 'ForgeKernel', attempt: 0 });
       const log = (logKind, text) => sw.emit({ kind: 'agent.log', runId: run.id, agentId: id, logKind, text });
-      const env = { FORGEKERNEL_RUNS_DIR: artifactRoot };
+      const env = { ...overrides, FORGEKERNEL_RUNS_DIR: artifactRoot };
       const created = await this.command(['new', task], { cwd, env, signal: run.abort.signal, log });
       if (!created.ok) { sw.emit({ kind: 'agent.end', runId: run.id, agentId: id, ok: false, error: created.error }); return { id, task, error: created.error }; }
       const dirs = readdirSync(artifactRoot, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(join(artifactRoot, d.name, 'run.json')));

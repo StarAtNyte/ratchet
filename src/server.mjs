@@ -181,6 +181,23 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       return void res.writeHead(204).end();
     }
 
+    if (url.pathname === '/api/forge' && req.method === 'POST') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      let body = ''; for await (const c of req) { body += c; if (body.length > 20000) return void res.writeHead(413).end(); }
+      let j; try { j = JSON.parse(body); } catch { return void res.writeHead(400).end('Invalid request'); }
+      if (!Array.isArray(j.tasks) || !j.tasks.length || j.tasks.length > 12 || j.tasks.some((t) => typeof t !== 'string' || !t.trim()) || !['check', 'start'].includes(j.action)) return void res.writeHead(400).end('Select one or more tasks.');
+      if (j.device != null && typeof j.device !== 'string') return void res.writeHead(400).end('Invalid device.');
+      try {
+        if (j.action === 'check') {
+          if (j.tasks.length !== 1) return void res.writeHead(400).end('Check one task at a time.');
+          const result = await forge.check(j.tasks[0], settings.dir, j.device);
+          return void res.writeHead(result.ok ? 200 : 400, { 'content-type': 'text/plain; charset=utf-8' }).end(result.ok ? result.output : result.error);
+        }
+        const run = forge.start(j.tasks, j.device);
+        return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ runId: run.id }));
+      } catch (e) { return void res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' }).end(e.message); }
+    }
+
     if (url.pathname === '/api/agent' && req.method === 'POST') {
       if (!authed(req, url)) return void res.writeHead(401).end();
       let body = '';

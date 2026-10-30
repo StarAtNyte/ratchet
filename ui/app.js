@@ -803,7 +803,9 @@ function renderAgents() {
   box.innerHTML = '';
   const header = el('div', 'agents-heading');
   const label = el('div', 'agents-heading-copy', `<strong>Run agents</strong><span>Inspect progress and troubleshoot failures</span>`);
-  const add = el('button', 'dact addAgent', '+ Add agent'); add.type = 'button'; add.onclick = openAgentModal; header.append(label, add); box.append(header);
+  const actions = el('div', 'agents-heading-actions');
+  const forgeButton = el('button', 'dact addAgent', 'Kernel'); forgeButton.type = 'button'; forgeButton.title = 'Start ForgeKernel campaigns'; forgeButton.onclick = openForgeModal;
+  const add = el('button', 'dact addAgent', '+ Add agent'); add.type = 'button'; add.onclick = openAgentModal; actions.append(forgeButton, add); header.append(label, actions); box.append(header);
   if (!r || !r.agents.size) { box.append(el('div', 'agents-empty', 'No agents in this run yet. Start research or add an agent to begin.')); return; }
   const list = el('div', 'agent-list');
   [...r.agents.values()].forEach((a) => {
@@ -920,6 +922,33 @@ function refreshDrawer() {
   const box = body.querySelector('#loginCode'); if (box && typed) { box.value = typed; if (hadFocus) box.focus(); }
   const modelBox = body.querySelector('#accountModel'); if (modelBox && modelFocused) { modelBox.value = modelTyped; modelBox.focus(); }
 }
+
+// ---------- ForgeKernel campaign launcher ----------
+function openForgeModal() { $('#forgeResult').hidden = true; $('#forgeModal').hidden = false; $('#forgeTasks').focus(); }
+function closeForgeModal() { $('#forgeModal').hidden = true; }
+$('#forgeClose').onclick = closeForgeModal;
+$('#forgeModal').addEventListener('mousedown', (e) => { if (e.target.id === 'forgeModal') closeForgeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#forgeModal').hidden) closeForgeModal(); });
+$('#forgeDevice').onchange = () => { const kind = $('#forgeDevice').value; $('#forgeDeviceField').hidden = kind === 'configured'; $('#forgeDeviceLabel').textContent = kind === 'local' ? 'CUDA device index' : 'Modal GPU type'; $('#forgeDeviceValue').placeholder = kind === 'local' ? 'e.g. 0' : 'e.g. H200 or B200'; };
+async function forgeAction(action) {
+  const tasks = $('#forgeTasks').value.split('\n').map((x) => x.trim()).filter(Boolean);
+  const kind = $('#forgeDevice').value; const value = $('#forgeDeviceValue').value.trim();
+  const result = $('#forgeResult'); result.hidden = false;
+  if (!tasks.length) { result.textContent = 'Enter at least one task directory.'; return; }
+  if (action === 'check' && tasks.length !== 1) { result.textContent = 'Check one task at a time.'; return; }
+  if (kind !== 'configured' && !value) { result.textContent = kind === 'local' ? 'Enter a CUDA device index.' : 'Enter a Modal GPU type.'; return; }
+  const buttons = [$('#forgeCheck'), $('#forgeStart')]; buttons.forEach((b) => { b.disabled = true; });
+  result.textContent = action === 'check' ? 'Checking the task and device configuration…' : 'Starting campaigns…';
+  try {
+    const response = await api2('/api/forge', { action, tasks, device: kind === 'configured' ? 'configured' : `${kind}:${value}` });
+    if (!response.ok) result.textContent = (await response.text()) || 'Could not start the ForgeKernel operation.';
+    else if (action === 'check') result.textContent = await response.text();
+    else { const data = await response.json(); result.textContent = `Started ${data.runId}. Follow its campaigns in the graph.`; }
+  } catch { result.textContent = 'Could not reach the Ratchet server.'; }
+  finally { buttons.forEach((b) => { b.disabled = false; }); }
+}
+$('#forgeCheck').onclick = () => forgeAction('check');
+$('#forgeStart').onclick = () => forgeAction('start');
 
 // ---------- add-account wizard: pick a provider, then sign in ----------
 const PROVIDERS = {
