@@ -34,7 +34,7 @@ export class Swarm {
   }
 
   /** Pick the best account for a harness preference, waiting for slots / resets. */
-  async acquire(pref, signal, onWait, pin = null, exclude = new Set()) {
+  async acquire(pref, signal, onWait, pin = null, exclude = new Set(), strict = false) {
     let announced = false;
     for (;;) {
       if (signal.aborted) throw new Error('aborted');
@@ -44,6 +44,7 @@ export class Swarm {
       const eligible = all.filter((a) => a.enabled !== false && (pin ? a.id === pin : a.authed !== false && !exclude.has(a.id)));
       if (pin && all.some((a) => a.id === pin && a.enabled === false)) throw new Error(`account ${pin} is not in use`);
       if (!pin && !eligible.length) throw new Error('no other signed-in account left to try');
+      if (strict && pref && pref !== 'any' && !eligible.some((a) => a.harness === pref)) throw new Error(`no eligible ${pref} account for independent verification`);
       const usable = eligible.filter((a) => a.limitedUntil <= Date.now());
       if (pin && !all.some((a) => a.id === pin)) throw new Error(`account ${pin} not found`);
       if (!all.length) throw new Error('no accounts registered (try: account add claude)');
@@ -53,10 +54,10 @@ export class Swarm {
         await sleep(Math.min(Math.max(wake - Date.now(), 1000), 15_000), signal);
         continue;
       }
-      let candidates = pref && pref !== 'any' ? usable.filter((a) => a.harness === pref) : usable;
-      if (!candidates.length) candidates = usable;
-      const free = candidates.filter((a) => this.pool.free(a, this.settings.slots)).sort((x, y) => x.load - y.load || x.done - y.done);
-      if (free.length) { const a = free[0]; a.load++; return a; }
+      const free = usable.filter((a) => this.pool.free(a, this.settings.slots));
+      const preferred = pref && pref !== 'any' ? free.filter((a) => a.harness === pref) : free;
+      const candidates = (preferred.length ? preferred : strict && pref && pref !== 'any' ? [] : free).sort((x, y) => x.load - y.load || x.done - y.done);
+      if (candidates.length) { const a = candidates[0]; a.load++; return a; }
       await sleep(400, signal);
     }
   }
@@ -94,7 +95,7 @@ export class Swarm {
 
     for (let attempt = 0; attempt < 6; attempt++) {
       let acct;
-      try { acct = await this.acquire(avoid ? this.other(avoid) : spec.pref, run.abort.signal, (m) => log('sys', m), spec.pin ?? null, tried); }
+      try { acct = await this.acquire(avoid ? this.other(avoid) : spec.pref, run.abort.signal, (m) => log('sys', m), spec.pin ?? null, tried, spec.role === 'verify'); }
       catch (e) { return this.finish(run, rec, { ok: false, text: '', error: e.message }); }
       rec.harness = acct.harness; rec.account = acct.id;
       acct.task = `${spec.role}: ${spec.title}`;
@@ -284,7 +285,7 @@ export class Swarm {
     // 1. plan
     const plan = await this.agent(run, {
       id: 'lead', role: 'lead', title: 'Plan', pref: 'claude',
-      prompt: `[[ROLE:plan]]\nYou are the lead of a research swarm.\n${this.ctx(run)}\n\n${this.memory()}${run.chain?.prev?.report ? `This is round ${run.chain.round}. The previous round (${run.chain.prev.id}) concluded:\n${String(run.chain.prev.report).slice(0, 6000)}\n\nDo not redo settled work. Go deeper: chase its open questions, unclear claims and best next experiments.\n\n` : ''}Inspect the workspace briefly, then split the task into at most ${maxWorkers} independent lines of attack that different researchers can pursue in parallel. Cover distinct approaches, not rewordings. Each line gets a harness: "claude" for long reading/synthesis/writing, "codex" for code-heavy experiments, "any" otherwise.\nReply with ONLY a JSON block:\n\`\`\`json\n{"subtasks":[{"title":"short","prompt":"self-contained instructions","harness":"claude|codex|any"}]}\n\`\`\``,
+      prompt: `[[ROLE:plan]]\nYou are the lead of a research swarm.\n${this.ctx(run)}\n\n${this.memory()}${run.chain?.prev?.report ? `This is round ${run.chain.round}. The previous round (${run.chain.prev.id}) concluded:\n${String(run.chain.prev.report).slice(0, 6000)}\n\nDo not redo settled work. Go deeper: chase its open questions, unclear claims and best next experiments.\n\n` : ''}Inspect the workspace briefly, then split the task into at most ${maxWorkers} independent lines of attack that different researchers can pursue in parallel. Cover distinct approaches, not rewordings. When the user requests performance optimization, assign concrete implementation, correctness checks, benchmarking, and iterative improvements; when the user explicitly requests submission, include the documented submission and result-review workflow. Coordinate shared files and remote benchmarks to avoid conflicting concurrent work. Each line gets a harness: "claude" for long reading/synthesis/writing, "codex" for code-heavy experiments, "any" otherwise.\nReply with ONLY a JSON block:\n\`\`\`json\n{"subtasks":[{"title":"short","prompt":"self-contained instructions","harness":"claude|codex|any"}]}\n\`\`\``,
     });
     if (signal.aborted) return this.end(run, 'stopped');
     const parsed = plan.ok ? extractJson(plan.text) : null;
@@ -320,7 +321,7 @@ export class Swarm {
       : 'You are a sub-agent: do not spawn further agents. [[DEPTH:2]]';
     const res = await this.agent(run, {
       id, role: depth > 1 ? 'sub' : 'worker', title: st.title, parent: parent ?? 'lead', pref: st.harness,
-      prompt: `[[ROLE:worker]]\nYou are a researcher in a swarm. Be rigorous; check every claim against primary evidence (papers, code you actually ran, data). Prefer experiments and proofs over opinion.\n${this.ctx(run)}\n\nYour assignment: ${st.title}\n${st.prompt}\n\nWrite working notes and artifacts under ${join(run.root, 'findings', id + '-work')}/ and a summary to ${notes}. Do not modify existing project files unless the task requires it.\n${spawnRule}\n\nFinish with a short prose summary, then ONE JSON block:\n\`\`\`json\n{"claims":[{"text":"one checkable claim","source":"where the evidence is (url, file, command)"}],"spawn":[]}\n\`\`\``,
+      prompt: `[[ROLE:worker]]\nYou are a researcher in a swarm. Be rigorous; check every claim against primary evidence (papers, code you actually ran, data). Prefer experiments and proofs over opinion.\n${this.ctx(run)}\n\nYour assignment: ${st.title}\n${st.prompt}\n\nWrite working notes and artifacts under ${join(run.root, 'findings', id + '-work')}/ and a summary to ${notes}. Do not modify existing project files unless the task requires it.\n${spawnRule}\nIf this assignment requests optimization, make concrete improvements, run correctness and performance checks, compare results to the baseline, and iterate using the measured outcome. If the user explicitly requested submissions, use the workspace's documented submission process, record the result and iterate; never claim a submission or benchmark succeeded without evidence. Coordinate shared files and benchmark resources with other workers.\n\nFinish with a short prose summary, then ONE JSON block:\n\`\`\`json\n{"claims":[{"text":"one checkable claim","source":"where the evidence is (url, file, command)"}],"spawn":[]}\n\`\`\``,
     });
     const out = res.ok ? extractJson(res.text) : null;
     const rec = run.agents.get(id);

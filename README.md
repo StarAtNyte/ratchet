@@ -181,7 +181,7 @@ Output lives in `<workspace>/.ratchet/runs/<id>/opt/`: `archive.json`, `failures
 | `accounts`, `account add\|login\|probe\|rm` | Manage the pool |
 | `runs`, `stop [id\|all]`, `report [id]` | Inspect and control runs |
 | `mode yolo\|auto` | `yolo` (default) = full permissions; `auto` = workspace-write sandbox |
-| `set slots\|workers <n>` | Jobs per account / max lines of attack per run |
+| `set slots\|workers <n>` | Jobs per account / max lines of attack per run (defaults: 4 / 12) |
 | `clear` | Clear the dashboard view |
 
 ## Safety

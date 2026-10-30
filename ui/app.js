@@ -9,7 +9,7 @@ loadColors();
 const tint = (c, pct) => `color-mix(in oklab, ${c} ${pct}%, transparent)`;
 
 const S = {
-  settings: { dir: '', mode: 'auto', slots: 2 },
+  settings: { dir: '', mode: 'auto', slots: 4 },
   commands: [],
   accounts: new Map(),
   logins: {},

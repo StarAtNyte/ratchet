@@ -136,3 +136,13 @@ test('follow-up instructions are saved and included in future agent context', as
     run.status = 'stopped'; assert.throws(() => swarm.followup('more'), /No active research run/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('scheduler uses free accounts when preferred provider is busy', async () => {
+  const { Swarm } = await import('../src/swarm.mjs');
+  const busy = { id: 'codex-1', harness: 'codex', enabled: true, authed: true, limitedUntil: 0, load: 4, done: 0 };
+  const idle = { id: 'claude-1', harness: 'claude', enabled: true, authed: true, limitedUntil: 0, load: 0, done: 0 };
+  const pool = { list: () => [busy, idle], refresh: () => {}, free: (a, cap) => a.load < cap };
+  const swarm = new Swarm({ pool, emit: () => {}, settings: { slots: 4 } });
+  assert.equal(await swarm.acquire('codex', new AbortController().signal, () => {}), idle);
+  assert.equal(idle.load, 1);
+});

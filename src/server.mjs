@@ -47,7 +47,7 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
     for (const c of clients) c.write(data);
   };
 
-  const settings = { dir, mode: process.env.RATCHET_MODE === 'auto' ? 'auto' : 'yolo', mock, slots: 2, workers: 6, agentTimeoutMin: 30, rounds: 0, recent: loadRecent().filter((d) => existsSync(d)) };
+  const settings = { dir, mode: process.env.RATCHET_MODE === 'auto' ? 'auto' : 'yolo', mock, slots: 4, workers: 12, agentTimeoutMin: 30, rounds: 0, recent: loadRecent().filter((d) => existsSync(d)) };
   const remember = (d) => {
     settings.recent = [d, ...settings.recent.filter((x) => x !== d)].slice(0, 8);
     try { writeFileSync(STATE, JSON.stringify({ recent: settings.recent })); } catch { /* best effort */ }
