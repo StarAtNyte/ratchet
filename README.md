@@ -190,7 +190,28 @@ Plain ES modules with no build step. Layout: `src/harness.mjs` (CLI/SDK adapters
 
 ## Roadmap
 
-Meta-prompt and harness evolution between rounds, a shared claim board across machines, an Evidra campaign as a worker type, and an archive and score-curve view in the UI.
+In priority order. Each item is scoped so it can be built and checked on its own.
+
+**1. Reliability of real runs** (nothing else matters if real runs flake)
+- Run a real two-account swarm end to end and fix what breaks; record real Claude and Codex limit messages and tighten the limit and reset-time parsers against them.
+- Persist runs, claims and the archive so a restart can resume a run instead of losing it.
+- Per-agent timeouts and a visible retry history; surface harness stderr in the agent details.
+- Show real quota use per account where the CLIs expose it.
+
+**2. Add-agent flow**
+- Model and effort choice per agent, working-folder override, and saved templates.
+- Launch several agents at once; send a follow-up message to a running agent and resume a finished one.
+- Stop a single agent from its details panel.
+
+**3. Research quality**
+- Iterative rounds: plan, run, verify, then re-plan from what was refuted or left unclear.
+- Memory that lasts across runs for confirmed facts as well as dead ends.
+- Optimiser: per-family score curves and an archive view, meta-prompt evolution between rounds, and an Evidra campaign as a worker type.
+
+**4. Look and layout**
+- Review each screen at real data volumes (50+ agents, long logs) and fix density, label collisions on the graph, and narrow-width layouts.
+- A browser-driven visual check of every drawer and modal, run before each release.
+- Bundle the Console theme fonts so the intended typography renders everywhere.
 
 ## Prior art
 
