@@ -225,4 +225,8 @@ test('built-in kernel tasks resolve independently of the workspace', async () =>
   assert.ok(forge.listTasks().some((t) => t.value === 'builtin:muse_prefill_boundary'));
   assert.match(forge.resolveTask('builtin:muse_prefill_boundary', '/tmp'), /tasks\/muse_prefill_boundary$/);
   assert.throws(() => forge.resolveTask('builtin:../outside', '/tmp'), /Invalid/);
+  assert.equal(forge.resolveTask('@/some/task', '/tmp'), '/some/task');
+  assert.equal(forge.resolveTask('@task', '/tmp'), '/tmp/task');
+  assert.match(forge.resolveTask('@builtin:muse_prefill_boundary', '/tmp'), /tasks\/muse_prefill_boundary$/);
+  assert.throws(() => forge.resolveTask('@', '/tmp'), /task folder/);
 });

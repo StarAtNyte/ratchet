@@ -243,10 +243,10 @@ kernel list
 kernel check builtin:muse_prefill_boundary
 kernel run builtin:muse_prefill_boundary
 kernel check --device modal:H200 /path/to/task
-kernel run --device local:0 /path/to/task
+kernel run --device local:0 @/path/to/task
 ```
 
-The existing `forge` commands remain available as aliases. `kernel run` requires a task directory, not a free-form prompt; tasks define the kernel, evaluator, and optimization budget.
+The existing `forge` commands remain available as aliases. `kernel run` accepts a task directory path, optionally prefixed with `@` (for example, `@/path/to/task` or `@tasks/my-task`). It requires a task directory containing `task.toml`, rather than an arbitrary project folder; tasks define the kernel, evaluator, and optimization budget.
 
 The first check or campaign automatically prepares a Python virtual environment in `~/.ratchet/kernel-venv` and installs the Modal client. Python 3.11+ and the Claude CLI are required. Machine-specific Forge settings and credentials may be placed in `~/.ratchet/forge.env` using the format in `local.env.example`; the process environment takes precedence. Select **Use configured device**, a Modal GPU type, or a local CUDA device for each launch. Task directories specify architecture, shapes, reference, evaluator, and budgets. Match the task architecture to the selected GPU; a dry run checks configuration but does not validate GPU availability.
 

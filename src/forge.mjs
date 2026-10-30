@@ -71,7 +71,9 @@ export class ForgeSwarm {
   }
 
   resolveTask(task, cwd) {
-    const value = String(task);
+    const raw = String(task);
+    const value = raw.startsWith('@') ? raw.slice(1) : raw;
+    if (!value) throw new Error('Provide a task folder after @.');
     if (value.startsWith('builtin:')) {
       const name = value.slice('builtin:'.length);
       if (!/^[a-zA-Z0-9_-]+$/.test(name)) throw new Error('Invalid built-in task name.');
@@ -92,7 +94,7 @@ export class ForgeSwarm {
     if (!tasks.length) throw new Error('Usage: forge start <task-directory> [task-directory ...]');
     if (tasks.length > 12) throw new Error('At most 12 ForgeKernel campaigns can be started together.');
     const paths = tasks.map((task) => this.resolveTask(task, cwd));
-    for (const task of paths) if (!existsSync(join(task, 'task.toml'))) throw new Error(`No task.toml in ${task}`);
+    for (const task of paths) if (!existsSync(join(task, 'task.toml'))) throw new Error(`No task.toml in ${task}. Choose a kernel task folder containing task.toml, description.md, shapes.json, and a reference/ directory.`);
     const run = this.swarm.newRun(`ForgeKernel: ${paths.map((path) => basename(path)).join(', ')}`, 'forge');
     this.drive(run, paths, cwd, overrides).catch((error) => this.swarm.end(run, 'failed', error.message));
     return run;
