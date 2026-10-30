@@ -20,22 +20,24 @@ Ratchet is the wide, fast fan-out layer with a UI. It is the sister tool to [Evi
 
 Requires **Node 22+** and at least one harness CLI (`claude`, `codex` or `agy`) that you are already logged in to.
 
-One-liner (the repo is private, so the script is fetched with your `gh` token):
-
 ```bash
-curl -fsSL -H "Authorization: Bearer $(gh auth token)" \
-  https://raw.githubusercontent.com/StarAtNyte/ratchet/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/StarAtNyte/ratchet/main/install.sh | sh
+ratchet --mock
 ```
 
-It clones the repo to `~/.local/share/ratchet` (override with `RATCHET_DIR`), runs `npm install`, and links `ratchet` into `~/.local/bin`. If the repo is ever made public, drop the auth header: `curl -fsSL https://raw.githubusercontent.com/StarAtNyte/ratchet/main/install.sh | bash`.
+The installer clones the repo, packs it, and installs `ratchet` as a global npm command (into the default npm prefix, or `~/.local` when that is not writable). Set `RATCHET_REF` to install a branch or tag. Or install straight from GitHub:
+
+```bash
+npm install --global https://github.com/StarAtNyte/ratchet.git
+```
 
 From a checkout instead:
 
 ```bash
-git clone git@github.com:StarAtNyte/ratchet.git && cd ratchet && ./install.sh
+git clone https://github.com/StarAtNyte/ratchet.git && cd ratchet && npm install && npm link
 ```
 
-Update by re-running the same one-liner (it pulls and reinstalls).
+Update by re-running the same one-liner.
 
 ## Quick start
 
