@@ -156,6 +156,16 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       return;
     }
 
+    if (url.pathname === '/api/account/model' && req.method === 'POST') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      let body = ''; for await (const c of req) { body += c; if (body.length > 4096) return void res.writeHead(413).end(); }
+      let j; try { j = JSON.parse(body); } catch { return void res.writeHead(400).end(); }
+      if (typeof j.id !== 'string' || typeof j.model !== 'string') return void res.writeHead(400).end();
+      try { if (!pool.setModel(j.id, j.model.trim())) return void res.writeHead(404).end(); }
+      catch (e) { return void res.writeHead(400).end(e.message); }
+      return void res.writeHead(204).end();
+    }
+
     if ((url.pathname === '/api/login' || url.pathname === '/api/login/input') && req.method === 'POST') {
       if (!authed(req, url)) return void res.writeHead(401).end();
       let body = '';

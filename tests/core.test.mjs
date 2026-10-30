@@ -84,9 +84,9 @@ test('accounts survive restarts, multiple instances, and an empty registry', asy
       import assert from 'node:assert/strict';
       import { AccountPool } from './src/accounts.mjs';
       const a = new AccountPool(() => {}), b = new AccountPool(() => {});
-      const first = a.add('gemini'); const second = b.add('opencode');
+      const first = a.add('gemini'); const second = b.add('opencode'); const codex = a.add('codex'); a.setModel(codex.id, 'gpt-example');
       const restored = new AccountPool(() => {});
-      assert.ok(restored.get(first.id)); assert.ok(restored.get(second.id));
+      assert.ok(restored.get(first.id)); assert.ok(restored.get(second.id)); assert.equal(restored.get(codex.id).model, 'gpt-example'); assert.throws(() => restored.setModel(first.id, 'model'), /not supported/); assert.throws(() => restored.setModel(codex.id, 'bad model'), /valid model/);
       const reset = Date.now() + 3600000; restored.markLimited(restored.get(first.id), reset); const again = new AccountPool(() => {}); assert.equal(again.get(first.id).enabled, false); assert.equal(again.get(first.id).limitedUntil, reset); assert.equal(again.get(first.id).status, 'limited'); assert.equal(again.get(second.id).enabled, true);
       for (const account of [...restored.list()]) restored.remove(account.id);
       assert.equal(new AccountPool(() => {}).list().length, 0);

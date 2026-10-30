@@ -452,3 +452,7 @@ h2 { min-height: 54px; color: var(--color-ink-2); font-weight: 600; }
 .prompt { font-size: var(--text-lg); line-height: 1; }
 .kbd { font-size: 11px; }
 @media (max-width: 56rem) { #termOut, .quick { padding-inline: var(--space-md); } #termForm { margin-inline: var(--space-sm); } }
+.model-form { display: grid; gap: var(--space-xs); margin-top: var(--space-xs); }
+.model-form label { color: var(--color-ink-2); font-size: var(--text-xs); }
+.model-controls { display: flex; gap: var(--space-xs); }
+.model-controls input { min-width: 0; flex: 1; padding: var(--space-xs) var(--space-sm); border: 1px solid var(--color-rule); border-radius: var(--radius-pill); color: var(--color-ink); background: var(--color-paper-3); font: var(--text-sm) var(--font-outlier); }

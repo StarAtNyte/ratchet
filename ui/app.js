@@ -819,7 +819,7 @@ function signInHtml(a) {
 const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
 function refreshDrawer() {
   if (!drawer) return;
-  const body = $(drawer.type === 'account' ? '#agentDetailBody' : '#dbody'); const keep = body.scrollTop; const typed = body.querySelector('#loginCode')?.value; const hadFocus = document.activeElement?.id === 'loginCode';
+  const body = $(drawer.type === 'account' ? '#agentDetailBody' : '#dbody'); const keep = body.scrollTop; const typed = body.querySelector('#loginCode')?.value; const hadFocus = document.activeElement?.id === 'loginCode'; const modelInput = body.querySelector('#accountModel'); const modelTyped = modelInput?.value; const modelFocused = document.activeElement === modelInput;
   if (drawer.type === 'account') {
     const a = S.accounts.get(drawer.id);
     if (!a) { $('#dclose').click(); return; }
@@ -834,9 +834,11 @@ function refreshDrawer() {
       ['provider usage', 'Unavailable from the current integration'],
       ['slots in use', `${a.load} / ${S.settings.slots}`], ['jobs done', a.done], ['jobs failed', a.failed],
       ['limit resets in', esc(left)], ['current task', esc(a.task ?? '-')], ['config folder', esc(a.configDir ?? '(default login)')],
-    ]) + signInHtml(a)
+    ]) + (['claude', 'codex'].includes(a.harness) ? `<div class="dsec">Model</div><form id="modelForm" class="model-form"><label for="accountModel">Model name</label><div class="model-controls"><input id="accountModel" value="${esc(a.model ?? '')}" placeholder="Provider default" autocomplete="off" spellcheck="false"><button class="dact" type="submit">Save</button></div><span class="muted2">Leave blank to use the provider default. Applies to new assignments.</span><span class="err" id="modelError" role="status"></span></form>` : `<div class="dsec">Model</div><div class="muted2">Model selection is not available for this provider.</div>`) + signInHtml(a)
       + `<div class="dacts account-actions"><button class="dact" data-act="probe" ${a.checking ? 'disabled' : ''}>${a.checking ? 'Checking…' : 'Check sign-in'}</button><button class="dact" data-act="rm">Remove account</button></div>`
       + `<div class="dsec">Recent jobs (${jobs.length})</div><div class="dlist">${jobs.slice(-12).reverse().map(({ r, g }, i) => `<div data-job="${r.id}/${g.id}"><span>${esc(r.id)} · ${esc(g.id)} · ${esc(g.title ?? '')}</span><span class="pill ${g.status}">${g.status}</span></div>`).join('') || '<div class="muted2">none yet</div>'}</div>`;
+    const modelForm = body.querySelector('#modelForm');
+    if (modelForm) modelForm.onsubmit = async (event) => { event.preventDefault(); const field = body.querySelector('#accountModel'); const response = await api2('/api/account/model', { id: a.id, model: field.value.trim() }); if (!response.ok) body.querySelector('#modelError').textContent = await response.text() || 'Could not save model.'; };
     body.querySelectorAll('[data-act]').forEach((b) => { b.onclick = () => {
       const act = b.dataset.act;
       if (act === 'copy') navigator.clipboard?.writeText(a.hint);
@@ -871,6 +873,7 @@ function refreshDrawer() {
   }
   body.scrollTop = keep;
   const box = body.querySelector('#loginCode'); if (box && typed) { box.value = typed; if (hadFocus) box.focus(); }
+  const modelBox = body.querySelector('#accountModel'); if (modelBox && modelFocused) { modelBox.value = modelTyped; modelBox.focus(); }
 }
 
 // ---------- add-account wizard: pick a provider, then sign in ----------

@@ -57,11 +57,11 @@ function lineSplitter(onLine) {
  * Run one agent turn on a real CLI. Resolves {ok, text, limited, resetAt, error}.
  * onLog({kind:'text'|'tool'|'err'|'sys', text})
  */
-export function runCli({ harness, env, cwd, prompt, mode, onLog, signal }) {
-  if (harness === 'codex') return runCodexSdk({ env, cwd, prompt, mode, onLog, signal });
+export function runCli({ harness, account, env, cwd, prompt, mode, onLog, signal }) {
+  if (harness === 'codex') return runCodexSdk({ env, cwd, prompt, mode, onLog, signal, model: account?.model });
   if (TEXT[harness]) return runText(harness, { env, cwd, prompt, mode, onLog, signal });
   const cmd = 'claude';
-  const args = ['-p', '--output-format', 'stream-json', '--verbose',
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', ...(account?.model ? ['--model', account.model] : []),
     ...(mode === 'yolo' ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', 'Read Write Edit Glob Grep WebSearch WebFetch Bash Task'])];
 
   return new Promise((resolve) => {
@@ -161,13 +161,13 @@ function runText(name, { env, cwd, prompt, mode, onLog, signal }) {
 }
 
 /** Codex via the official SDK (same engine Evidra uses). One thread per call. */
-async function runCodexSdk({ env, cwd, prompt, mode, onLog, signal }) {
+async function runCodexSdk({ env, cwd, prompt, mode, onLog, signal, model }) {
   let final = ''; let errText = ''; let failed = false;
   try {
     const { Codex } = await import('@openai/codex-sdk');
     const codex = new Codex({ env: Object.fromEntries(Object.entries(mergeEnv(env)).filter(([, v]) => v != null)) });
     const thread = codex.startThread({
-      workingDirectory: cwd, skipGitRepoCheck: true, approvalPolicy: 'never', networkAccessEnabled: true,
+      ...(model ? { model } : {}), workingDirectory: cwd, skipGitRepoCheck: true, approvalPolicy: 'never', networkAccessEnabled: true,
       sandboxMode: mode === 'yolo' ? 'danger-full-access' : 'workspace-write',
     });
     const { events } = await thread.runStreamed(prompt, { signal });

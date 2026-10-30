@@ -15,7 +15,7 @@ const fresh = (a) => ({ ...a, enabled: a.enabled !== false, status: a.limitedUnt
 
 export function pub(a) {
   return {
-    id: a.id, harness: a.harness, enabled: a.enabled !== false, status: a.status, load: a.load, limitedUntil: a.limitedUntil,
+    id: a.id, harness: a.harness, enabled: a.enabled !== false, model: a.model ?? null, status: a.status, load: a.load, limitedUntil: a.limitedUntil,
     task: a.task, done: a.done, failed: a.failed, authed: a.authed, checking: !!a.checking, authMessage: a.authMessage ?? null, email: a.email, plan: a.plan, configDir: a.configDir,
   };
 }
@@ -74,7 +74,7 @@ export class AccountPool {
     const existing = new Map(this.accounts.map((a) => [a.id, a]));
     this.accounts = saved.map((entry) => {
       const a = existing.get(entry.id);
-      if (a && a.harness === entry.harness && a.configDir === entry.configDir) { a.enabled = entry.enabled !== false; a.limitedUntil = Math.max(a.limitedUntil || 0, entry.limitedUntil || 0); return a; }
+      if (a && a.harness === entry.harness && a.configDir === entry.configDir) { a.enabled = entry.enabled !== false; a.model = entry.model || null; a.limitedUntil = Math.max(a.limitedUntil || 0, entry.limitedUntil || 0); return a; }
       const restored = fresh(entry);
       if (restored.harness === 'codex') Object.assign(restored, codexIdentity(restored.configDir));
       return restored;
@@ -83,7 +83,7 @@ export class AccountPool {
 
   save() {
     if (this.mock) return;
-    this.writeRegistry(this.accounts.map(({ id, harness, configDir, enabled, limitedUntil }) => ({ id, harness, configDir, enabled: enabled !== false, limitedUntil: limitedUntil > Date.now() ? limitedUntil : 0 })));
+    this.writeRegistry(this.accounts.map(({ id, harness, configDir, enabled, limitedUntil, model }) => ({ id, harness, configDir, enabled: enabled !== false, model: model || null, limitedUntil: limitedUntil > Date.now() ? limitedUntil : 0 })));
   }
 
   list() { return this.accounts; }
@@ -124,6 +124,16 @@ export class AccountPool {
     this.save();
     this.publish(account);
     return true;
+  }
+
+  setModel(id, model) {
+    this.syncRegistry();
+    const account = this.get(id);
+    if (!account) return false;
+    if (!['claude', 'codex'].includes(account.harness)) throw new Error('Model selection is not supported for this provider');
+    if (model && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(model)) throw new Error('Enter a valid model name');
+    account.model = model || null;
+    this.save(); this.publish(account); return true;
   }
 
   env(a) {
