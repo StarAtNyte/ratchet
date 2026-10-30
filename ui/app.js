@@ -407,7 +407,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#pic
 // ---------- agents tab, drawers, add account ----------
 const fmtDur = (ms) => (ms < 1000 ? '0s' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`);
 let listsQueued = false;
-function scheduleLists() { if (listsQueued) return; listsQueued = true; requestAnimationFrame(() => { listsQueued = false; renderAgents(); refreshDrawer(); }); }
+function scheduleLists() { if (listsQueued) return; listsQueued = true; requestAnimationFrame(() => { listsQueued = false; renderAgents(); refreshDrawer(); renderWizard(); }); }
 
 function renderAgents() {
   const box = $('#agents'); const r = cur();
@@ -435,12 +435,14 @@ const api2 = (u, b) => fetch(u, { method: 'POST', headers: { 'x-ratchet-token': 
 const beginLogin = (id) => { S.logins[id] = { text: '', url: null, done: false }; api2('/api/login', { id }); };
 function signInHtml(a) {
   const L = S.logins[a.id];
-  const canAuto = a.harness === 'claude' || a.harness === 'codex';
+  const canAuto = a.harness === 'claude' || a.harness === 'codex' || (a.harness === 'antigravity' && !!a.configDir);
   const status = a.authed === true ? '<span class="pill done">signed in</span>' : a.authed === false ? '<span class="pill failed">not signed in</span>' : '<span class="pill">unknown</span>';
   let h = `<div class="dsec">Sign in ${status}</div>`;
-  if (!canAuto) return h + `<div class="muted2">Automatic sign-in is not available for ${esc(a.harness)}. Run this in a terminal, then use check login:</div><div class="dpre">${esc(a.hint || 'uses your existing CLI login')}</div><div class="dacts"><button class="dact" data-act="copy">copy command</button></div>`;
+  if (a.harness === 'antigravity' && !a.configDir) return h + `<div class="muted2">This account has no private folder. It uses whichever Google account is signed in to the Antigravity app on this machine. Add another Antigravity account for a separate Google login.</div><div class="dacts"><button class="dact primary" data-act="probe">check sign-in</button></div>${a.authed == null ? '<div class="muted2" style="margin-top:8px">Checking with a one-line test prompt…</div>' : ''}`;
+  if (!canAuto) return h + `<div class="muted2">Automatic sign-in is not available for ${esc(a.harness)}. Run this in a terminal, then use check sign-in:</div><div class="dpre">${esc(a.hint || 'uses your existing CLI login')}</div><div class="dacts"><button class="dact" data-act="copy">copy command</button><button class="dact" data-act="probe">check sign-in</button></div>`;
   h += `<div class="dacts"><button class="dact primary" data-act="signin">${L && !L.done ? 'restart sign-in' : 'sign in'}</button>${L?.url ? '<button class="dact primary" data-act="open">open sign-in page</button>' : ''}</div>`;
   if (a.harness === 'claude' && L && !L.done) h += `<div class="muted2" style="margin-top:8px">After approving in the browser, paste the code it shows:</div><div class="codeRow"><input id="loginCode" spellcheck="false" placeholder="paste code"><button class="dact" data-act="send">submit</button></div>`;
+  if (a.harness === 'antigravity' && L && !L.done) h += `<div class="muted2" style="margin-top:8px">Open the page and finish the Google sign-in within 60 seconds. If the page shows a code, paste it here:</div><div class="codeRow"><input id="loginCode" spellcheck="false" placeholder="paste code if shown"><button class="dact" data-act="send">submit</button></div>`;
   if (a.harness === 'codex' && L && !L.done) h += `<div class="muted2" style="margin-top:8px">Open the page, then enter the code shown below.</div>`;
   if (L) h += `<div class="dpre" style="margin-top:8px">${esc(L.text.trim() || 'waiting…')}</div>${L.done ? `<div class="${L.ok ? 'ok' : 'err'}" style="margin-top:4px">${L.ok ? 'Signed in. This account is ready.' : 'Sign-in did not finish. Try again.'}</div>` : ''}`;
   return h;
@@ -500,23 +502,80 @@ function refreshDrawer() {
   const box = body.querySelector('#loginCode'); if (box && typed) { box.value = typed; if (hadFocus) box.focus(); }
 }
 
-const HARNESS_NOTE = { claude: 'Claude Code (headless)', codex: 'Codex via SDK', antigravity: 'Antigravity CLI (experimental isolation)', gemini: 'Gemini CLI', opencode: 'OpenCode' };
-$('#addAcc').onclick = () => {
-  const box = $('#harnessPick'); box.innerHTML = '';
-  (S.harnesses?.length ? S.harnesses : ['claude', 'codex', 'antigravity']).forEach((h) => {
-    const b = el('button', '', `${esc(h)}<small>${esc(HARNESS_NOTE[h] ?? 'custom harness')}</small>`); b.type = 'button';
-    b.onclick = async () => {
-      const before = new Set(S.accounts.keys());
-      await sendCmd(`account add ${h}`);
-      $('#addModal').hidden = true;
-      setTimeout(() => { const n = [...S.accounts.keys()].find((k) => !before.has(k)); if (n) { openAccount(n); if (h === 'claude' || h === 'codex') beginLogin(n); } }, 300);
-    };
-    box.append(b);
-  });
-  $('#addModal').hidden = false;
+// ---------- add-account wizard: pick a provider, then sign in ----------
+const PROVIDERS = {
+  claude: { name: 'Claude Code', how: 'Claude subscription or Console. Sign in in your browser, then paste the code it shows.', auto: true },
+  codex: { name: 'Codex', how: 'ChatGPT plan. Sign in in your browser with a one-time device code.', auto: true },
+  antigravity: { name: 'Antigravity', how: 'Google account. Sign in in your browser within 60 seconds of starting.', auto: true },
+  gemini: { name: 'Gemini CLI', how: 'Sign in once from a terminal.' },
+  opencode: { name: 'OpenCode', how: 'Sign in once from a terminal.' },
 };
-$('#addCancel').onclick = () => { $('#addModal').hidden = true; };
-$('#addModal').addEventListener('mousedown', (e) => { if (e.target.id === 'addModal') $('#addModal').hidden = true; });
+const WZ = { step: 'pick', harness: null, id: null };
+const wizOpen = () => !$('#addModal').hidden;
+function renderWizard() {
+  if (!wizOpen()) return;
+  const body = $('#addBody'); const typed = body.querySelector('#loginCode')?.value; const hadFocus = document.activeElement?.id === 'loginCode';
+  $('#addBack').hidden = WZ.step === 'pick'; $('#addDone').hidden = true;
+  if (WZ.step === 'pick') {
+    $('#addTitle').textContent = 'Add account: choose a provider';
+    body.innerHTML = '<div class="providers"></div>';
+    const list = body.firstChild;
+    (S.harnesses?.length ? S.harnesses : Object.keys(PROVIDERS)).forEach((h) => {
+      const p = PROVIDERS[h] ?? { name: h, how: 'Custom harness from ~/.ratchet/harnesses.json. Sign in from a terminal.' };
+      const have = [...S.accounts.values()].filter((a) => a.harness === h).length;
+      const full = p.single && have > 0;
+      const b = el('button', `provider ${h}`, `<b>${esc(p.name)}</b><span>${esc(p.how)}</span><small>${have ? `${have} connected` : 'none connected'}${full ? ', limit reached' : ''}</small>`);
+      b.type = 'button'; b.disabled = full;
+      b.onclick = async () => {
+        const before = new Set(S.accounts.keys());
+        await sendCmd(`account add ${h}`);
+        setTimeout(() => {
+          const id = [...S.accounts.keys()].find((k) => !before.has(k));
+          if (!id) return;
+          Object.assign(WZ, { step: 'signin', harness: h, id });
+          if (PROVIDERS[h]?.auto) beginLogin(id);
+          else if (h === 'antigravity') sendCmd(`account probe ${id}`);
+          renderWizard();
+        }, 300);
+      };
+      list.append(b);
+    });
+    return;
+  }
+  const a = S.accounts.get(WZ.id);
+  if (!a) { WZ.step = 'pick'; return renderWizard(); }
+  const p = PROVIDERS[a.harness] ?? { name: a.harness };
+  $('#addTitle').textContent = `Sign in: ${p.name} (${a.id})`;
+  const L = S.logins[a.id];
+  const done = a.authed === true || (L?.done && L.ok);
+  body.innerHTML = signInHtml(a) + (done ? '<div class="ok big">Connected. Ratchet will now spread work onto this account.</div>' : '');
+  $('#addDone').hidden = !done;
+  bindSignIn(body, a);
+  const box = body.querySelector('#loginCode'); if (box && typed) { box.value = typed; if (hadFocus) box.focus(); }
+}
+function bindSignIn(root, a) {
+  root.querySelectorAll('[data-act]').forEach((b) => { b.onclick = () => {
+    const act = b.dataset.act;
+    if (act === 'copy') navigator.clipboard?.writeText(a.hint);
+    else if (act === 'signin') beginLogin(a.id);
+    else if (act === 'open') window.open(S.logins[a.id]?.url, '_blank', 'noopener');
+    else if (act === 'send') { const v = root.querySelector('#loginCode')?.value; if (v) api2('/api/login/input', { id: a.id, text: v }); }
+    else if (act === 'rm') { if (confirm(`Remove ${a.id}?`)) { sendCmd(`account rm ${a.id}`); $('#dclose').click(); } }
+    else sendCmd(`account ${act} ${a.id}`);
+  }; });
+}
+const closeWizard = (keep) => {
+  const a = WZ.id && S.accounts.get(WZ.id);
+  // an account that never signed in is removed on cancel, so the pool holds only working accounts
+  if (!keep && WZ.step === 'signin' && a && a.authed !== true && !(S.logins[a.id]?.ok)) sendCmd(`account rm ${a.id}`);
+  Object.assign(WZ, { step: 'pick', harness: null, id: null });
+  $('#addModal').hidden = true;
+};
+$('#addAcc').onclick = () => { Object.assign(WZ, { step: 'pick', harness: null, id: null }); $('#addModal').hidden = false; renderWizard(); };
+$('#addCancel').onclick = () => closeWizard(false);
+$('#addDone').onclick = () => { const id = WZ.id; closeWizard(true); if (id) openAccount(id); };
+$('#addBack').onclick = () => { closeWizard(false); $('#addModal').hidden = false; renderWizard(); };
+$('#addModal').addEventListener('mousedown', (e) => { if (e.target.id === 'addModal') closeWizard(false); });
 setInterval(() => { if (drawer && drawer.type === 'agent') refreshDrawer(); }, 2000);
 
 // ---------- add agent ----------

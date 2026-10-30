@@ -62,6 +62,7 @@ export class AccountPool {
     const id = `${harness}-${i}`;
     const configDir = join(HOME, 'accounts', id);
     mkdirSync(configDir, { recursive: true });
+    if (harness === 'antigravity') mkdirSync(join(configDir, 'run'), { recursive: true, mode: 0o700 });
     const a = fresh({ id, harness, configDir });
     this.accounts.push(a);
     this.save();
@@ -80,13 +81,16 @@ export class AccountPool {
 
   env(a) {
     if (!a?.configDir) return {};
+    // agy keeps its token in the system keyring; hiding the keyring makes it use a separate login
+    if (a.harness === 'antigravity') return { HOME: a.configDir, XDG_RUNTIME_DIR: join(a.configDir, 'run'), DBUS_SESSION_BUS_ADDRESS: null };
     const key = ENV_KEY[a.harness];
     return key ? { [key]: a.configDir } : {};
   }
 
   loginHint(a) {
     if (a.harness === 'claude') return `CLAUDE_CONFIG_DIR=${a.configDir} claude   # then run /login`;
-    if (a.harness !== 'codex') return `${ENV_KEY[a.harness] ? ENV_KEY[a.harness] + '=' + a.configDir + ' ' : ''}${a.harness === 'antigravity' ? 'agy' : a.harness}   # sign in; isolation of non-claude/codex accounts is experimental`;
+    if (a.harness === 'antigravity') return a.configDir ? 'sign in from the account panel (Google sign-in)' : 'uses the Antigravity app sign-in on this machine';
+    if (a.harness !== 'codex') return `${ENV_KEY[a.harness] ? ENV_KEY[a.harness] + '=' + a.configDir + ' ' : ''}${a.harness}   # sign in once; isolation for this harness is unverified`;
     return `CODEX_HOME=${a.configDir} codex login --device-auth`;
   }
 

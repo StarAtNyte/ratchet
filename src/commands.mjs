@@ -3,11 +3,11 @@ import { existsSync, statSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
-import { HARNESSES } from './harness.mjs';
+import { HARNESSES, mergeEnv } from './harness.mjs';
 import { TEMPLATE } from './optimizer.mjs';
 import { writeFileSync } from 'node:fs';
 
-export const COMMANDS = ['help', 'run', 'opt', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
+export const COMMANDS = ['help', 'run', 'resume', 'opt', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
 
 const HELP = [
   ['run <task>', 'launch a swarm on the task (bare text does the same)'],
@@ -18,11 +18,12 @@ const HELP = [
   ['account login <id>', 'run the login flow for an account'],
   ['account probe [id]', 'check which accounts are logged in'],
   ['account rm <id>', 'remove an account'],
-  ['runs', 'list runs'],
+  ['runs', 'list runs (earlier sessions included)'],
+  ['resume <runId>', 're-run an interrupted or failed research run; finished agents are restored, not re-run'],
   ['stop [runId|all]', 'abort a run'],
   ['report [runId]', 'print a run report'],
   ['mode <auto|yolo>', 'agent permission level (auto = workspace-write, yolo = no sandbox)'],
-  ['set slots|workers <n>', 'parallel jobs per account / max lines of attack per run'],
+  ['set slots|workers|timeout <n>', 'jobs per account / max lines of attack per run / minutes before an agent is stopped'],
   ['clear', 'clear the terminal'],
 ];
 
@@ -88,9 +89,8 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
       if (sub === 'add') {
         if (!HARNESSES.includes(a1)) return say(`usage: account add <${HARNESSES.join('|')}>`, 'err');
         const a = pool.add(a1);
-        say(`created ${a.id} -> ${a.configDir}`, 'ok');
-        say(`log in with:  ${pool.loginHint(a)}`, 'dim');
-        say(`or run:  account login ${a.id}`, 'dim');
+        say(`created ${a.id}${a.configDir ? ` -> ${a.configDir}` : ''}`, 'ok');
+        if (a.configDir) say(`sign in from the account panel, or:  ${pool.loginHint(a)}`, 'dim');
         return;
       }
       if (sub === 'rm') return say(pool.remove(a1) ? `removed ${a1}` : `no such account: ${a1}`, pool.get(a1) ? 'ok' : 'err');
@@ -109,16 +109,24 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
       if (sub === 'probe') {
         const targets = a1 ? [pool.get(a1)].filter(Boolean) : pool.list();
         await Promise.all(targets.map((a) => new Promise((done) => {
-          if (!['claude', 'codex'].includes(a.harness)) { a.authed = null; say(`  ${a.id}: no status command; run a task to verify`, 'dim'); return done(); }
-          const args = a.harness === 'claude' ? ['auth', 'status'] : ['login', 'status'];
-          const p = spawn(a.harness, args, { env: { ...process.env, ...pool.env(a) }, stdio: 'ignore' });
-          const t = setTimeout(() => p.kill(), 15000);
+          if (!['claude', 'codex', 'antigravity'].includes(a.harness)) { a.authed = null; say(`  ${a.id}: no status command; run a task to verify`, 'dim'); return done(); }
+          // antigravity has no status command: a one-line prompt is the only reliable check
+          const [bin, args] = a.harness === 'claude' ? ['claude', ['auth', 'status']] : a.harness === 'codex' ? ['codex', ['login', 'status']] : ['agy', ['--print=Reply with OK']];
+          const p = spawn(bin, args, { env: mergeEnv(pool.env(a)), stdio: 'ignore' });
+          const t = setTimeout(() => p.kill(), a.harness === 'antigravity' ? 90000 : 15000);
           p.on('error', () => { clearTimeout(t); a.authed = false; pool.publish(a); say(`  ${a.id}: cli missing`, 'err'); done(); });
           p.on('close', (c) => { clearTimeout(t); a.authed = c === 0; pool.publish(a); say(`  ${a.id}: ${a.authed ? 'logged in' : 'NOT logged in'}`, a.authed ? 'ok' : 'warn'); done(); });
         })));
         return;
       }
       return say('usage: account add|rm|login|probe', 'err');
+    }
+
+    case 'resume': {
+      if (!arg) return say('usage: resume <runId>  (see: runs)', 'err');
+      try { const { run, restored } = swarm.resume(arg); say(`resumed ${run.id}: ${restored} finished agents restored, the rest re-run`, 'ok'); }
+      catch (e) { say(e.message, 'err'); }
+      return;
     }
 
     case 'runs':
@@ -152,7 +160,8 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
     case 'set': {
       const [k, v] = rest;
       const n = Number(v);
-      if (!['slots', 'workers'].includes(k) || !(n >= 1 && n <= 32)) return say('usage: set slots|workers <1-32>', 'err');
+      if (k === 'timeout') { if (!(n >= 1 && n <= 600)) return say('usage: set timeout <1-600 minutes>', 'err'); settings.agentTimeoutMin = n; swarm.emit({ kind: 'settings', settings: { ...settings } }); return say(`agents stop after ${n} min`, 'ok'); }
+      if (!['slots', 'workers'].includes(k) || !(n >= 1 && n <= 32)) return say('usage: set slots|workers|timeout <n>', 'err');
       settings[k] = n;
       swarm.emit({ kind: 'settings', settings: { ...settings } });
       return say(`${k} = ${n}`, 'ok');

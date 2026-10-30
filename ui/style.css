@@ -174,3 +174,9 @@ button.ws { background: none; }
 #agPrompt { width: 100%; resize: vertical; font-family: var(--font-outlier); font-size: var(--text-xs); }
 .fieldrow input:focus-visible, .fieldrow select:focus-visible, #agPrompt:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
 .addAgent { width: 100%; margin-bottom: var(--space-sm); }
+
+.providers { display: grid; gap: var(--space-xs); }
+.provider { display: grid; gap: var(--space-3xs); text-align: left; padding: var(--space-sm) var(--space-md); }
+.provider b { font-weight: 500; font-size: var(--text-md); } .provider span { color: var(--color-ink-2); font-size: var(--text-sm); } .provider small { color: var(--color-muted); font: var(--text-xs) var(--font-outlier); }
+.provider.claude b { color: var(--harness-claude); } .provider.codex b { color: var(--harness-codex); } .provider.antigravity b { color: var(--harness-antigravity); }
+.ok.big { margin-top: var(--space-sm); font-size: var(--text-sm); }

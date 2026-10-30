@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { AccountPool, HOME } from './accounts.mjs';
 import { Swarm } from './swarm.mjs';
 import { Optimizer } from './optimizer.mjs';
-import { HARNESSES } from './harness.mjs';
+import { HARNESSES, mergeEnv } from './harness.mjs';
 const CLEAN = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]/g;
-const LOGIN_CMD = { claude: ['claude', ['auth', 'login']], codex: ['codex', ['login', '--device-auth']] };
+const LOGIN_CMD = { claude: ['claude', ['auth', 'login']], codex: ['codex', ['login', '--device-auth']], antigravity: ['agy', ['--print=Reply with OK']] };
 import { execCommand, COMMANDS } from './commands.mjs';
 
 const UI = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
@@ -34,7 +34,7 @@ export async function startServer({ dir, port, mock, open }) {
     for (const c of clients) c.write(data);
   };
 
-  const settings = { dir, mode: 'auto', mock, slots: 2, workers: 6, recent: loadRecent().filter((d) => existsSync(d)) };
+  const settings = { dir, mode: 'auto', mock, slots: 2, workers: 6, agentTimeoutMin: 30, recent: loadRecent().filter((d) => existsSync(d)) };
   const remember = (d) => {
     settings.recent = [d, ...settings.recent.filter((x) => x !== d)].slice(0, 8);
     try { writeFileSync(STATE, JSON.stringify({ recent: settings.recent })); } catch { /* best effort */ }
@@ -43,16 +43,17 @@ export async function startServer({ dir, port, mock, open }) {
   const pool = new AccountPool(emit, { mock });
   const swarm = new Swarm({ pool, emit, settings });
   const optimizer = new Optimizer(swarm);
+  const restored = swarm.restore();
   const say = (text, cls = '') => emit({ kind: 'term', text, cls });
 
   const logins = new Map();
   const startLogin = (a) => {
     logins.get(a.id)?.kill();
     const def = LOGIN_CMD[a.harness];
-    if (!def) { emit({ kind: 'login', id: a.id, text: `Sign in from a terminal: ${pool.loginHint(a)}`, done: true, ok: false }); return; }
+    if (!def || (a.harness === 'antigravity' && !a.configDir)) { emit({ kind: 'login', id: a.id, text: `Sign in from a terminal: ${pool.loginHint(a)}`, done: true, ok: false }); return; }
     if (a.configDir) mkdirSync(a.configDir, { recursive: true });
     emit({ kind: 'login', id: a.id, reset: true, text: 'starting sign-in…' });
-    const p = spawn(def[0], def[1], { env: { ...process.env, ...pool.env(a) }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const p = spawn(def[0], def[1], { env: mergeEnv(pool.env(a)), stdio: ['pipe', 'pipe', 'pipe'] });
     logins.set(a.id, p);
     const feed = (d) => {
       const text = String(d).replace(CLEAN, '').replace(/\r/g, '');
@@ -155,6 +156,7 @@ export async function startServer({ dir, port, mock, open }) {
   if (open) spawn('xdg-open', [link], { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
 
   say(`workspace ${dir}`, 'dim');
+  if (restored) say(`loaded ${restored} earlier run(s) from this workspace; interrupted ones can be resumed`, 'dim');
   say('type a research task and press enter, or "help"', 'dim');
   const shutdown = () => { swarm.stop('all'); server.close(); process.exit(0); };
   process.on('SIGINT', shutdown);

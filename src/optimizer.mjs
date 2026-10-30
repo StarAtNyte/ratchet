@@ -53,7 +53,7 @@ export class Optimizer {
     const { settings } = this.swarm;
     const cfg = loadConfig(settings.dir, settings.mock);
     if (objective) cfg.objective = objective;
-    const run = this.swarm.newRun(`optimize: ${cfg.objective}`);
+    const run = this.swarm.newRun(`optimize: ${cfg.objective}`, 'optimize');
     const optDir = join(run.root, 'opt');
     mkdirSync(join(optDir, 'snap'), { recursive: true });
     const o = { run, cfg, optDir, archive: new Archive({ direction: cfg.direction, islands: Math.max(2, Math.min(cfg.parallel, 4)) }), inflight: new Set(), failures: [], n: 0, t0: Date.now(), evalLock: Promise.resolve() };

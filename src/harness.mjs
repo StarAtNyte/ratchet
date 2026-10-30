@@ -51,7 +51,7 @@ export function runCli({ harness, env, cwd, prompt, mode, onLog, signal }) {
     '--allowedTools', 'Read Write Edit Glob Grep WebSearch WebFetch Bash Task'];
 
   return new Promise((resolve) => {
-    const childEnv = { ...process.env, ...env };
+    const childEnv = mergeEnv(env);
     delete childEnv.CLAUDECODE;
     delete childEnv.CLAUDE_CODE_ENTRYPOINT;
     const p = spawn(cmd, args, { cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], signal });
@@ -102,7 +102,7 @@ import { join } from 'node:path';
 
 /** Plain-text print-mode CLIs. `{prompt}` in args is replaced; envKey isolates an account's config dir (unverified for non-claude/codex). */
 const BUILTIN_TEXT = {
-  antigravity: { cmd: 'agy', args: (p, yolo) => [...(yolo ? ['--dangerously-skip-permissions'] : ['--mode', 'accept-edits']), `--print=${p}`], envKey: 'ANTIGRAVITY_GEMINI_DIR' },
+  antigravity: { cmd: 'agy', args: (p, yolo) => [...(yolo ? ['--dangerously-skip-permissions'] : ['--mode', 'accept-edits']), `--print=${p}`] },
   gemini: { cmd: 'gemini', args: (p, yolo) => ['-p', p, ...(yolo ? ['--yolo'] : [])], envKey: 'GEMINI_CLI_HOME' },
   opencode: { cmd: 'opencode', args: (p) => ['run', p], envKey: 'XDG_CONFIG_HOME' },
 };
@@ -116,13 +116,19 @@ function userHarnesses() {
   } catch { return {}; }
 }
 export const TEXT = { ...BUILTIN_TEXT, ...userHarnesses() };
+/** process.env plus overrides; a null value removes the variable (used to hide the keyring from antigravity). */
+export function mergeEnv(extra = {}) {
+  const env = { ...process.env };
+  for (const [k, v] of Object.entries(extra)) { if (v == null) delete env[k]; else env[k] = v; }
+  return env;
+}
 export const HARNESSES = ['claude', 'codex', ...Object.keys(TEXT)];
 export const ENV_KEY = { claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', ...Object.fromEntries(Object.entries(TEXT).map(([k, d]) => [k, d.envKey])) };
 
 function runText(name, { env, cwd, prompt, mode, onLog, signal }) {
   const def = TEXT[name];
   return new Promise((resolve) => {
-    const p = spawn(def.cmd, def.args(prompt, mode === 'yolo'), { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], signal });
+    const p = spawn(def.cmd, def.args(prompt, mode === 'yolo'), { cwd, env: mergeEnv(env), stdio: ['ignore', 'pipe', 'pipe'], signal });
     let out = ''; let err = '';
     p.on('error', (e) => resolve({ ok: false, text: '', error: `spawn ${def.cmd}: ${e.message}`, limited: false }));
     p.stdout.setEncoding('utf8');
@@ -144,7 +150,7 @@ async function runCodexSdk({ env, cwd, prompt, mode, onLog, signal }) {
   let final = ''; let errText = ''; let failed = false;
   try {
     const { Codex } = await import('@openai/codex-sdk');
-    const codex = new Codex({ env: Object.fromEntries(Object.entries({ ...process.env, ...env }).filter(([, v]) => v != null)) });
+    const codex = new Codex({ env: Object.fromEntries(Object.entries(mergeEnv(env)).filter(([, v]) => v != null)) });
     const thread = codex.startThread({
       workingDirectory: cwd, skipGitRepoCheck: true, approvalPolicy: 'never', networkAccessEnabled: true,
       sandboxMode: mode === 'yolo' ? 'danger-full-access' : 'workspace-write',

@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, readdirSync } from 'node:fs';
 import { runCli } from './harness.mjs';
 import { runMock } from './mock.mjs';
 
@@ -21,7 +21,13 @@ export function extractJson(text) {
 export class Swarm {
   constructor({ pool, emit, settings }) {
     this.pool = pool;
-    this.emit = emit;
+    this.emitRaw = emit;
+    // every run event is also appended to the run's events.jsonl so a restart can show and resume it
+    this.emit = (ev) => {
+      emit(ev);
+      const run = ev.runId && this.runs.get(ev.runId);
+      if (run?.root) { try { appendFileSync(join(run.root, 'events.jsonl'), `${JSON.stringify({ ...ev, t: Date.now() })}\n`); } catch { /* best effort */ } }
+    };
     this.settings = settings; // {dir, mode, mock, slots, workers}
     this.runs = new Map();
     this.seq = 0;
@@ -72,6 +78,13 @@ export class Swarm {
     run.agents.set(id, rec);
     this.emit({ kind: 'agent.start', runId: run.id, ...rec, pref: spec.pref, prompt: String(spec.prompt ?? '').slice(0, 6000) });
     const log = (kind, text) => this.emit({ kind: 'agent.log', runId: run.id, agentId: id, logKind: kind, text });
+    const hit = run.cache.get(id);
+    if (hit) {
+      Object.assign(rec, { harness: hit.harness, account: hit.account });
+      this.emit({ kind: 'agent.assign', runId: run.id, agentId: id, harness: hit.harness, account: hit.account, attempt: 0 });
+      log('sys', 'restored from the previous session (not re-run)');
+      return this.finish(run, rec, hit);
+    }
     let avoid = null;
 
     for (let attempt = 0; attempt < 6; attempt++) {
@@ -85,10 +98,17 @@ export class Swarm {
       log('sys', `running on ${acct.id}`);
 
       const runner = this.settings.mock ? runMock : runCli;
-      const res = await runner({
+      const limitMs = (this.settings.agentTimeoutMin ?? 30) * 60000;
+      const timer = AbortSignal.timeout(limitMs);
+      let res = await runner({
         harness: acct.harness, account: acct, env: this.pool.env(acct), cwd: spec.cwd ?? this.settings.dir,
-        prompt: spec.prompt, mode: this.settings.mode, signal: run.abort.signal, onLog: (l) => log(l.kind, l.text),
+        prompt: spec.prompt, mode: this.settings.mode, signal: AbortSignal.any([run.abort.signal, timer]), onLog: (l) => log(l.kind, l.text),
       });
+      if (!res.ok && timer.aborted && !run.abort.signal.aborted) res = { ...res, limited: false, error: `timed out after ${limitMs / 60000} min` };
+      if (res.ok) {
+        run.results[id] = { ok: true, text: res.text, harness: acct.harness, account: acct.id };
+        try { writeFileSync(join(run.root, 'results.json'), JSON.stringify(run.results)); } catch { /* best effort */ }
+      }
       this.release(acct, res.ok);
       if (res.ok) return this.finish(run, rec, res);
       if (run.abort.signal.aborted) return this.finish(run, rec, { ...res, error: 'stopped' });
@@ -113,14 +133,58 @@ export class Swarm {
     return res;
   }
 
-  newRun(task) {
-    const id = `r${(++this.seq).toString().padStart(2, '0')}`;
-    const root = join(this.settings.dir, '.ratchet', 'runs', `${Date.now().toString(36)}-${id}`);
+  newRun(task, kind = 'research', reuse = null) {
+    let id = reuse?.id;
+    if (!id) { do id = `r${Date.now().toString(36).slice(-4)}${++this.seq}`; while (this.runs.has(id)); }
+    const root = reuse?.root ?? join(this.settings.dir, '.ratchet', 'runs', `${Date.now().toString(36)}-${id}`);
     mkdirSync(join(root, 'findings'), { recursive: true });
-    const run = { id, task, root, agents: new Map(), claims: [], abort: new AbortController(), status: 'running', report: null };
+    const run = { id, task, kind, root, agents: new Map(), claims: [], abort: new AbortController(), status: 'running', report: null, cache: reuse?.cache ?? new Map(), results: reuse?.results ?? {} };
     this.runs.set(id, run);
+    if (!reuse) writeFileSync(join(root, 'meta.json'), JSON.stringify({ id, task, kind, started: Date.now() }));
     this.emit({ kind: 'run.start', runId: id, task, dir: this.settings.dir, root });
     return run;
+  }
+
+  /** Show runs of this workspace from earlier sessions; unfinished ones are marked interrupted. */
+  restore(limit = 8) {
+    const dir = join(this.settings.dir, '.ratchet', 'runs');
+    if (!existsSync(dir)) return 0;
+    const folders = readdirSync(dir).filter((f) => existsSync(join(dir, f, 'events.jsonl'))).sort().slice(-limit);
+    for (const f of folders) {
+      const root = join(dir, f);
+      let events;
+      try { events = readFileSync(join(root, 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { continue; }
+      const start = events.find((e) => e.kind === 'run.start');
+      if (!start) continue;
+      let id = start.runId;
+      if (this.runs.has(id)) id = `${id}-${f.slice(0, 4)}`;
+      const ended = events.find((e) => e.kind === 'run.end');
+      const meta = (() => { try { return JSON.parse(readFileSync(join(root, 'meta.json'), 'utf8')); } catch { return {}; } })();
+      const report = events.find((e) => e.kind === 'run.report')?.markdown ?? null;
+      const claims = [];
+      for (const e of events) if (e.kind === 'claims') for (const c of e.claims) { const i = claims.findIndex((x) => x.id === c.id); if (i >= 0) claims[i] = c; else claims.push(c); }
+      const run = { id, task: start.task, kind: meta.kind ?? 'research', root, agents: new Map(), claims, abort: new AbortController(), status: ended ? ended.status : 'interrupted', report, cache: new Map(), results: {}, restored: true };
+      for (const e of events) if (e.kind === 'agent.start') run.agents.set(e.id, { id: e.id, role: e.role, title: e.title, parent: e.parent });
+      this.runs.set(id, run);
+      for (const e of events) this.emitRaw({ ...e, runId: id, restored: true });
+      if (!ended) this.emitRaw({ kind: 'run.end', runId: id, status: 'interrupted', note: `Ratchet stopped mid-run. Type: resume ${id}` });
+    }
+    return folders.length;
+  }
+
+  /** Re-run an interrupted or failed run; agents that already succeeded are restored from disk, not re-run. */
+  resume(id) {
+    const old = this.runs.get(id);
+    if (!old) throw new Error(`no run ${id}`);
+    if (old.status === 'running') throw new Error(`${id} is still running`);
+    if (old.kind !== 'research') throw new Error(`only research runs can be resumed (this one is ${old.kind})`);
+    let results = {};
+    try { results = JSON.parse(readFileSync(join(old.root, 'results.json'), 'utf8')); } catch { /* none saved */ }
+    const cache = new Map(Object.entries(results));
+    this.runs.delete(id);
+    const run = this.newRun(old.task, 'research', { id, root: old.root, cache, results });
+    this.drive(run).catch((e) => this.end(run, 'failed', e.message));
+    return { run, restored: cache.size };
   }
 
   start(task) {
@@ -134,7 +198,7 @@ export class Swarm {
     let run = [...this.runs.values()].reverse().find((r) => r.status === 'running');
     const own = !run;
     if (own) {
-      run = this.newRun('ad-hoc agent');
+      run = this.newRun('ad-hoc agent', 'adhoc');
       this.emit({ kind: 'agent.start', runId: run.id, id: 'lead', role: 'lead', title: 'You', parent: null, harness: null, account: null });
       run.agents.set('lead', { id: 'lead', role: 'lead', title: 'You' });
       this.emit({ kind: 'agent.end', runId: run.id, agentId: 'lead', ok: true, error: null });
