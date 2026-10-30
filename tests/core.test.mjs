@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Archive } from '../src/archive.mjs';
-import { parseReset } from '../src/harness.mjs';
+import { parseReset, LIMIT_RE } from '../src/harness.mjs';
 import { extractJson } from '../src/swarm.mjs';
 import { runEval } from '../src/optimizer.mjs';
 
@@ -111,4 +111,11 @@ test('interrupt stops a running shell command and its child process', async () =
   const command = execCommand('sleep 30', { say: (s) => lines.push(s), settings: { dir: process.cwd() }, signal: controller.signal });
   setTimeout(() => controller.abort(), 100);
   await Promise.race([command, new Promise((_, reject) => setTimeout(() => reject(new Error('interrupt did not stop command')), 3000))]);
+});
+
+
+test('weekly provider limit and dated time-zone reset are recognized', () => {
+  const message = "You've hit your weekly limit · resets Nov 1, 7:45am (Asia/Kathmandu)";
+  assert.match(message, LIMIT_RE);
+  assert.equal(parseReset(message, Date.UTC(2026, 9, 30)), Date.UTC(2026, 10, 1, 2, 0));
 });

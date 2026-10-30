@@ -111,6 +111,7 @@ export class Swarm {
       });
       if (!res.ok && timer.aborted && !run.abort.signal.aborted) res = { ...res, limited: false, error: `timed out after ${limitMs / 60000} min` };
       if (res.ok) {
+        acct.authed = true;
         run.results[id] = { ok: true, text: res.text, harness: acct.harness, account: acct.id };
         try { writeFileSync(join(run.root, 'results.json'), JSON.stringify(run.results)); } catch { /* best effort */ }
       }

@@ -128,6 +128,9 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       for (const e of history) res.write(`data: ${JSON.stringify(e)}\n\n`);
       pool.publishAll();
       clients.add(res);
+      if (!mock) for (const a of pool.list().filter((x) => ['claude', 'codex'].includes(x.harness) && x.authed == null && !x.checking)) {
+        void execCommand(`account probe ${a.id}`, { say: () => {}, swarm, pool, settings, optimizer, remember });
+      }
       const ka = setInterval(() => res.write(': ka\n\n'), 20000);
       req.on('close', () => { clearInterval(ka); clients.delete(res); });
       return;

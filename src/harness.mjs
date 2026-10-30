@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 
-const LIMIT_RE = /(usage limit|limit reached|rate.?limit|quota|exceeded your|too many requests|\b429\b|credit balance|try again (?:in|at|later))/i;
+export const LIMIT_RE = /(usage limit|(?:hit|reached) your (?:weekly |daily |session )?limit|limit reached|rate.?limit|quota|exceeded your|too many requests|\b429\b|credit balance|try again (?:in|at|later))/i;
 
 /** Best-effort parse of "resets at 3pm" / "try again in 2 hours" into epoch ms. */
 export function parseReset(text, now = Date.now()) {
@@ -9,6 +9,21 @@ export function parseReset(text, now = Date.now()) {
     const unit = rel[2].toLowerCase();
     const ms = unit.startsWith('d') ? 864e5 : unit.startsWith('h') ? 36e5 : 6e4;
     return now + Number(rel[1]) * ms;
+  }
+  // Provider reset messages can include a calendar date and an IANA time zone.
+  const dated = /(?:resets?|reset)\s+(?:on\s+|at\s+)?(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)(?:\s*\(([^)]+)\))?/i.exec(text);
+  if (dated) {
+    const month = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(dated[1].toLowerCase());
+    const day = Number(dated[2]); const hour = Number(dated[3]) % 12 + (dated[5].toLowerCase() === 'pm' ? 12 : 0); const minute = Number(dated[4] || 0);
+    const zone = dated[6] || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    try {
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' });
+      const parts = (time) => Object.fromEntries(fmt.formatToParts(time).filter((p) => p.type !== 'literal').map((p) => [p.type, Number(p.value)]));
+      let year = parts(now).year;
+      const convert = (y) => { const desired = Date.UTC(y, month, day, hour, minute); let guess = desired; for (let i = 0; i < 3; i++) { const p = parts(guess); guess += desired - Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute); } return guess; };
+      let reset = convert(year); if (reset <= now) reset = convert(++year);
+      return reset;
+    } catch { /* Fall through to the generic time parser. */ }
   }
   const abs = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i.exec(text);
   if (abs) {
