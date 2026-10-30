@@ -87,7 +87,7 @@ test('accounts survive restarts, multiple instances, and an empty registry', asy
       const first = a.add('gemini'); const second = b.add('opencode');
       const restored = new AccountPool(() => {});
       assert.ok(restored.get(first.id)); assert.ok(restored.get(second.id));
-      restored.setEnabled(first.id, false); const again = new AccountPool(() => {}); assert.equal(again.get(first.id).enabled, false); assert.equal(again.get(second.id).enabled, true);
+      const reset = Date.now() + 3600000; restored.markLimited(restored.get(first.id), reset); const again = new AccountPool(() => {}); assert.equal(again.get(first.id).enabled, false); assert.equal(again.get(first.id).limitedUntil, reset); assert.equal(again.get(first.id).status, 'limited'); assert.equal(again.get(second.id).enabled, true);
       for (const account of [...restored.list()]) restored.remove(account.id);
       assert.equal(new AccountPool(() => {}).list().length, 0);
     `;

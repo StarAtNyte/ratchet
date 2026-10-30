@@ -11,7 +11,7 @@ const which = (bin) => {
   try { return execFileSync('which', [bin], { encoding: 'utf8' }).trim() || null; } catch { return null; }
 };
 
-const fresh = (a) => ({ ...a, enabled: a.enabled !== false, status: 'idle', load: 0, limitedUntil: 0, task: null, done: 0, failed: 0, authed: null, email: null, plan: null });
+const fresh = (a) => ({ ...a, enabled: a.enabled !== false, status: a.limitedUntil > Date.now() ? 'limited' : 'idle', load: 0, limitedUntil: a.limitedUntil > Date.now() ? a.limitedUntil : 0, task: null, done: 0, failed: 0, authed: null, email: null, plan: null });
 
 export function pub(a) {
   return {
@@ -74,7 +74,7 @@ export class AccountPool {
     const existing = new Map(this.accounts.map((a) => [a.id, a]));
     this.accounts = saved.map((entry) => {
       const a = existing.get(entry.id);
-      if (a && a.harness === entry.harness && a.configDir === entry.configDir) { a.enabled = entry.enabled !== false; return a; }
+      if (a && a.harness === entry.harness && a.configDir === entry.configDir) { a.enabled = entry.enabled !== false; a.limitedUntil = Math.max(a.limitedUntil || 0, entry.limitedUntil || 0); return a; }
       const restored = fresh(entry);
       if (restored.harness === 'codex') Object.assign(restored, codexIdentity(restored.configDir));
       return restored;
@@ -83,7 +83,7 @@ export class AccountPool {
 
   save() {
     if (this.mock) return;
-    this.writeRegistry(this.accounts.map(({ id, harness, configDir, enabled }) => ({ id, harness, configDir, enabled: enabled !== false })));
+    this.writeRegistry(this.accounts.map(({ id, harness, configDir, enabled, limitedUntil }) => ({ id, harness, configDir, enabled: enabled !== false, limitedUntil: limitedUntil > Date.now() ? limitedUntil : 0 })));
   }
 
   list() { return this.accounts; }
@@ -146,9 +146,14 @@ export class AccountPool {
   }
 
   markLimited(a, resetAt) {
-    a.limitedUntil = resetAt;
-    a.status = 'limited';
-    this.publish(a);
+    this.syncRegistry();
+    const account = this.get(a.id);
+    if (!account) return;
+    account.limitedUntil = Math.max(account.limitedUntil || 0, resetAt);
+    account.enabled = false;
+    account.status = 'limited';
+    this.save();
+    this.publish(account);
   }
 
   refresh(a) {

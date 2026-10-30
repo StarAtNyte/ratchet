@@ -122,7 +122,7 @@ export class Swarm {
       acct.failed++;
       if (res.limited) {
         this.pool.markLimited(acct, res.resetAt);
-        log('err', `${acct.id} hit its limit (back ${new Date(res.resetAt).toLocaleTimeString()}); failing over`);
+        log('err', `${acct.id} hit its limit (resets ${new Date(res.resetAt).toLocaleString()}); moved to Not using and retrying elsewhere`);
         this.emit({ kind: 'agent.failover', runId: run.id, agentId: id, from: acct.id });
         avoid = null;
         continue;

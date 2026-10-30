@@ -309,7 +309,7 @@ function renderAccounts() {
     const d = el('div', `acc ${a.harness} ${a.status}`, `
       <div class="top"><span class="id">${esc(a.id)}</span><span class="account-state ${a.authed === true ? 'connected' : a.authed === false ? 'disconnected' : 'unknown'}">${a.checking ? 'Checking…' : a.authed === true ? 'Signed in' : a.authed === false ? 'Sign in needed' : 'Not checked'}</span></div>
       <div class="account-email">${esc(a.email ?? (a.checking ? 'Checking account details…' : a.authMessage ?? (a.authed === true ? 'Email not provided by provider' : a.authed === false ? 'Sign in to use this account' : 'Sign-in status unavailable')))}</div>
-      <div class="task">${esc(a.task ?? (a.enabled === false ? 'Excluded from new assignments' : a.status === 'limited' ? 'rate limited' : 'idle'))}</div>
+      <div class="task">${esc(a.task ?? (a.status === 'limited' ? 'Usage limit reached · excluded' : a.enabled === false ? 'Excluded from new assignments' : 'idle'))}</div>
       <div class="row"><span class="pips">${pips}</span><span>${a.done}✓ ${a.failed ? a.failed + '✗' : ''}</span>
         <span class="${a.status === 'limited' ? 'cd' : a.authed === false ? 'auth-no' : ''}" data-until="${a.limitedUntil || 0}">${a.authed === false ? 'not logged in' : ''}</span></div>`);
     d.draggable = true;
