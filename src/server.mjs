@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -20,8 +20,11 @@ const STATE = join(HOME, 'state.json');
 const loadRecent = () => { try { return JSON.parse(readFileSync(STATE, 'utf8')).recent ?? []; } catch { return []; } };
 const expand = (p) => resolve(String(p).replace(/^~(?=$|\/)/, homedir()));
 
-export async function startServer({ dir, port, mock, open }) {
-  const token = randomBytes(16).toString('hex');
+export async function startServer({ dir, port, mock, open, stableToken = false }) {
+  // a service keeps one token across restarts so its bookmarked URL keeps working
+  const tokenFile = join(HOME, 'token');
+  let token = stableToken && existsSync(tokenFile) ? readFileSync(tokenFile, 'utf8').trim() : '';
+  if (!/^[a-f0-9]{32}$/.test(token)) { token = randomBytes(16).toString('hex'); if (stableToken) writeFileSync(tokenFile, token, { mode: 0o600 }); }
   const clients = new Set();
   const history = [];
   let seq = 0;
@@ -34,7 +37,7 @@ export async function startServer({ dir, port, mock, open }) {
     for (const c of clients) c.write(data);
   };
 
-  const settings = { dir, mode: 'auto', mock, slots: 2, workers: 6, agentTimeoutMin: 30, recent: loadRecent().filter((d) => existsSync(d)) };
+  const settings = { dir, mode: process.env.RATCHET_MODE === 'auto' ? 'auto' : 'yolo', mock, slots: 2, workers: 6, agentTimeoutMin: 30, rounds: 0, recent: loadRecent().filter((d) => existsSync(d)) };
   const remember = (d) => {
     settings.recent = [d, ...settings.recent.filter((x) => x !== d)].slice(0, 8);
     try { writeFileSync(STATE, JSON.stringify({ recent: settings.recent })); } catch { /* best effort */ }
@@ -152,13 +155,18 @@ export async function startServer({ dir, port, mock, open }) {
 
   await new Promise((ok, fail) => { server.once('error', fail); server.listen(port, '127.0.0.1', ok); });
   const link = `http://127.0.0.1:${port}/?t=${token}`;
+  try { writeFileSync(join(HOME, 'url'), `${link}\n`, { mode: 0o600 }); } catch { /* best effort */ }
   console.log(`\n  RATCHET  ${mock ? '(mock agents)' : ''}\n  workspace  ${dir}\n  open       ${link}\n`);
   if (open) spawn('xdg-open', [link], { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
 
   say(`workspace ${dir}`, 'dim');
   if (restored) say(`loaded ${restored} earlier run(s) from this workspace; interrupted ones can be resumed`, 'dim');
   say('type a research task and press enter, or "help"', 'dim');
-  const shutdown = () => { swarm.stop('all'); server.close(); process.exit(0); };
+  const shutdown = () => {
+    swarm.stop('all'); server.close();
+    for (const f of ['url', 'pid']) { try { if (f === 'url' && !readFileSync(join(HOME, 'url'), 'utf8').includes(token)) continue; rmSync(join(HOME, f), { force: true }); } catch { /* gone */ } }
+    process.exit(0);
+  };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   return server;

@@ -47,8 +47,7 @@ export function runCli({ harness, env, cwd, prompt, mode, onLog, signal }) {
   if (TEXT[harness]) return runText(harness, { env, cwd, prompt, mode, onLog, signal });
   const cmd = 'claude';
   const args = ['-p', '--output-format', 'stream-json', '--verbose',
-    '--permission-mode', mode === 'yolo' ? 'bypassPermissions' : 'acceptEdits',
-    '--allowedTools', 'Read Write Edit Glob Grep WebSearch WebFetch Bash Task'];
+    ...(mode === 'yolo' ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', 'Read Write Edit Glob Grep WebSearch WebFetch Bash Task'])];
 
   return new Promise((resolve) => {
     const childEnv = mergeEnv(env);
@@ -102,7 +101,8 @@ import { join } from 'node:path';
 
 /** Plain-text print-mode CLIs. `{prompt}` in args is replaced; envKey isolates an account's config dir (unverified for non-claude/codex). */
 const BUILTIN_TEXT = {
-  antigravity: { cmd: 'agy', args: (p, yolo) => [...(yolo ? ['--dangerously-skip-permissions'] : ['--mode', 'accept-edits']), `--print=${p}`] },
+  // auto mode allows shell commands, matching claude's Bash and codex's workspace-write sandbox
+  antigravity: { cmd: 'agy', args: (p, yolo) => [...(yolo ? ['--dangerously-skip-permissions'] : ['--mode', 'accept-edits', '--settings', JSON.stringify({ permissions: { allow: ['command(*)'] } })]), `--print=${p}`] },
   gemini: { cmd: 'gemini', args: (p, yolo) => ['-p', p, ...(yolo ? ['--yolo'] : [])], envKey: 'GEMINI_CLI_HOME' },
   opencode: { cmd: 'opencode', args: (p) => ['run', p], envKey: 'XDG_CONFIG_HOME' },
 };

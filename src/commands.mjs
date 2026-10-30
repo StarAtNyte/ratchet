@@ -22,8 +22,8 @@ const HELP = [
   ['resume <runId>', 're-run an interrupted or failed research run; finished agents are restored, not re-run'],
   ['stop [runId|all]', 'abort a run'],
   ['report [runId]', 'print a run report'],
-  ['mode <auto|yolo>', 'agent permission level (auto = workspace-write, yolo = no sandbox)'],
-  ['set slots|workers|timeout <n>', 'jobs per account / max lines of attack per run / minutes before an agent is stopped'],
+  ['mode <yolo|auto>', 'yolo (default) = full permissions: codex --yolo, claude/agy --dangerously-skip-permissions; auto = sandboxed workspace-write'],
+  ['set slots|workers|timeout|rounds <n>', 'jobs per account / lines of attack / agent time limit (min) / research rounds (0 = until stopped)'],
   ['clear', 'clear the terminal'],
 ];
 
@@ -160,6 +160,7 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
     case 'set': {
       const [k, v] = rest;
       const n = Number(v);
+      if (k === 'rounds') { if (!(n >= 0 && n <= 1000)) return say('usage: set rounds <0-1000>  (0 = keep going until stopped)', 'err'); settings.rounds = n; swarm.emit({ kind: 'settings', settings: { ...settings } }); return say(n ? `research runs stop after ${n} round(s)` : 'research runs keep going until you stop them', 'ok'); }
       if (k === 'timeout') { if (!(n >= 1 && n <= 600)) return say('usage: set timeout <1-600 minutes>', 'err'); settings.agentTimeoutMin = n; swarm.emit({ kind: 'settings', settings: { ...settings } }); return say(`agents stop after ${n} min`, 'ok'); }
       if (!['slots', 'workers'].includes(k) || !(n >= 1 && n <= 32)) return say('usage: set slots|workers|timeout <n>', 'err');
       settings[k] = n;
@@ -173,7 +174,7 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
       if (!task) return say('usage: run <task>', 'err');
       if (!pool.list().length) return say('no accounts. try: account add claude', 'err');
       const r = swarm.start(task);
-      say(`run ${r.id} launched in ${settings.dir}`, 'ok');
+      say(`run ${r.id} launched in ${settings.dir}${settings.rounds ? '' : '; it keeps going round after round until you type stop'}`, 'ok');
     }
   }
 }

@@ -143,6 +143,8 @@ function renderRunbar() {
     b.textContent = `${r.id} · ${r.task}`;
     b.onclick = () => { S.current = r.id; S.focus = null; resetPanes(); r.feed.slice(-400).forEach(addFeed); renderRunbar(); renderStats(); };
     bar.append(b);
+    if (r.status === 'running' && r.id === S.current) { const x = el('button', 'stopRun'); x.type = 'button'; x.textContent = 'stop run'; x.onclick = () => sendCmd(`stop ${r.id}`); bar.append(x); }
+    if (r.status === 'interrupted' && r.id === S.current) { const x = el('button', 'stopRun'); x.type = 'button'; x.textContent = 'resume'; x.onclick = () => sendCmd(`resume ${r.id}`); bar.append(x); }
   }
 }
 

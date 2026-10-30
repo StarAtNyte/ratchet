@@ -34,17 +34,20 @@ export class Swarm {
   }
 
   /** Pick the best account for a harness preference, waiting for slots / resets. */
-  async acquire(pref, signal, onWait, pin = null) {
+  async acquire(pref, signal, onWait, pin = null, exclude = new Set()) {
     let announced = false;
     for (;;) {
       if (signal.aborted) throw new Error('aborted');
       const all = this.pool.list();
       all.forEach((a) => this.pool.refresh(a));
-      const usable = all.filter((a) => a.limitedUntil <= Date.now() && (!pin || a.id === pin));
+      // signed-out accounts and accounts that already failed this agent are skipped
+      const eligible = all.filter((a) => (pin ? a.id === pin : a.authed !== false && !exclude.has(a.id)));
+      if (!pin && !eligible.length) throw new Error('no other signed-in account left to try');
+      const usable = eligible.filter((a) => a.limitedUntil <= Date.now());
       if (pin && !all.some((a) => a.id === pin)) throw new Error(`account ${pin} not found`);
       if (!all.length) throw new Error('no accounts registered (try: account add claude)');
       if (!usable.length) {
-        const wake = Math.min(...all.map((a) => a.limitedUntil));
+        const wake = Math.min(...eligible.map((a) => a.limitedUntil));
         if (!announced) { onWait(`all accounts limited; waiting until ${new Date(wake).toLocaleTimeString()}`); announced = true; }
         await sleep(Math.min(Math.max(wake - Date.now(), 1000), 15_000), signal);
         continue;
@@ -86,10 +89,11 @@ export class Swarm {
       return this.finish(run, rec, hit);
     }
     let avoid = null;
+    const tried = new Set();
 
     for (let attempt = 0; attempt < 6; attempt++) {
       let acct;
-      try { acct = await this.acquire(avoid ? this.other(avoid) : spec.pref, run.abort.signal, (m) => log('sys', m), spec.pin ?? null); }
+      try { acct = await this.acquire(avoid ? this.other(avoid) : spec.pref, run.abort.signal, (m) => log('sys', m), spec.pin ?? null, tried); }
       catch (e) { return this.finish(run, rec, { ok: false, text: '', error: e.message }); }
       rec.harness = acct.harness; rec.account = acct.id;
       acct.task = `${spec.role}: ${spec.title}`;
@@ -121,8 +125,12 @@ export class Swarm {
         avoid = null;
         continue;
       }
+      tried.add(acct.id);
+      if (/\b401\b|unauthori[sz]ed|not logged in|authentication required|please (log|sign) ?in|missing bearer|invalid api key/i.test(res.error ?? '')) {
+        acct.authed = false;
+        log('err', `${acct.id} is not signed in; skipping it until you sign it in`);
+      } else log('err', res.error ?? 'failed');
       this.pool.publish(acct);
-      log('err', res.error ?? 'failed');
       avoid = spec.pin ? null : acct.harness; // try the other harness next unless pinned
     }
     return this.finish(run, rec, { ok: false, text: '', error: 'gave up after repeated failures' });
@@ -187,9 +195,16 @@ export class Swarm {
     return { run, restored: cache.size };
   }
 
-  start(task) {
-    const run = this.newRun(task);
-    this.drive(run).catch((e) => this.end(run, 'failed', e.message));
+  /** Start a research run. Rounds chain until the user stops them or the round limit is reached. */
+  start(task, chain = { round: 1, stopped: false, prev: null }) {
+    const run = this.newRun(chain.round > 1 ? `${task} (round ${chain.round})` : task);
+    run.chain = chain; run.baseTask = task;
+    this.emit({ kind: 'run.round', runId: run.id, round: chain.round });
+    this.drive(run).catch((e) => this.end(run, 'failed', e.message)).finally(() => {
+      const limit = this.settings.rounds ?? 0; // 0 = until stopped
+      if (chain.stopped || run.status !== 'done' || (limit && chain.round >= limit)) return;
+      setTimeout(() => { if (!chain.stopped) this.start(task, { round: chain.round + 1, stopped: false, prev: { id: run.id, report: run.report } }); chain.stopped = true; }, 5000);
+    });
     return run;
   }
 
@@ -216,6 +231,7 @@ export class Swarm {
 
   stop(id) {
     const targets = id === 'all' ? [...this.runs.values()] : [this.runs.get(id)].filter(Boolean);
+    targets.forEach((r) => { if (r.chain) r.chain.stopped = true; });
     targets.filter((r) => r.status === 'running').forEach((r) => r.abort.abort());
     return targets.length;
   }
@@ -250,7 +266,7 @@ export class Swarm {
     // 1. plan
     const plan = await this.agent(run, {
       id: 'lead', role: 'lead', title: 'Plan', pref: 'claude',
-      prompt: `[[ROLE:plan]]\nYou are the lead of a research swarm.\n${this.ctx(run)}\n\n${this.memory()}Inspect the workspace briefly, then split the task into at most ${maxWorkers} independent lines of attack that different researchers can pursue in parallel. Cover distinct approaches, not rewordings. Each line gets a harness: "claude" for long reading/synthesis/writing, "codex" for code-heavy experiments, "any" otherwise.\nReply with ONLY a JSON block:\n\`\`\`json\n{"subtasks":[{"title":"short","prompt":"self-contained instructions","harness":"claude|codex|any"}]}\n\`\`\``,
+      prompt: `[[ROLE:plan]]\nYou are the lead of a research swarm.\n${this.ctx(run)}\n\n${this.memory()}${run.chain?.prev?.report ? `This is round ${run.chain.round}. The previous round (${run.chain.prev.id}) concluded:\n${String(run.chain.prev.report).slice(0, 6000)}\n\nDo not redo settled work. Go deeper: chase its open questions, unclear claims and best next experiments.\n\n` : ''}Inspect the workspace briefly, then split the task into at most ${maxWorkers} independent lines of attack that different researchers can pursue in parallel. Cover distinct approaches, not rewordings. Each line gets a harness: "claude" for long reading/synthesis/writing, "codex" for code-heavy experiments, "any" otherwise.\nReply with ONLY a JSON block:\n\`\`\`json\n{"subtasks":[{"title":"short","prompt":"self-contained instructions","harness":"claude|codex|any"}]}\n\`\`\``,
     });
     if (signal.aborted) return this.end(run, 'stopped');
     const parsed = plan.ok ? extractJson(plan.text) : null;

@@ -165,14 +165,14 @@ Output lives in `<workspace>/.ratchet/runs/<id>/opt/`: `archive.json`, `failures
 | `dir [path\|n]`, `dir recent`, `dir mk <path>` | Show, change, list recent, or create-and-switch the workspace |
 | `accounts`, `account add\|login\|probe\|rm` | Manage the pool |
 | `runs`, `stop [id\|all]`, `report [id]` | Inspect and control runs |
-| `mode auto\|yolo` | `auto` = workspace-write sandbox, `yolo` = no sandbox |
+| `mode yolo\|auto` | `yolo` (default) = full permissions; `auto` = workspace-write sandbox |
 | `set slots\|workers <n>` | Jobs per account / max lines of attack per run |
 | `clear` | Clear the terminal |
 
 ## Safety
 
 - The server listens on `127.0.0.1` only, checks the `Host` header, and requires the per-launch token on both the event stream and command endpoint.
-- Agents run in `auto` mode by default: Claude Code with `acceptEdits` plus a fixed tool allowlist, and Codex with a `workspace-write` sandbox. `yolo` removes the sandbox; use it only in a throwaway environment.
+- Agents run with **full permissions by default** (`yolo`): Codex with no sandbox and no approvals (the SDK equivalent of `codex --yolo`), Claude Code and Antigravity with `--dangerously-skip-permissions`. They can run any command and edit any file your user can. Type `mode auto` (or start with `RATCHET_MODE=auto`) for the sandboxed mode: Claude Code `acceptEdits` with a tool allowlist, Codex `workspace-write`, Antigravity `accept-edits` with shell commands allowed.
 - Agents can run shell commands and read the web. Point Ratchet at folders you are comfortable with agents editing.
 
 ## Status

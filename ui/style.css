@@ -180,3 +180,4 @@ button.ws { background: none; }
 .provider b { font-weight: 500; font-size: var(--text-md); } .provider span { color: var(--color-ink-2); font-size: var(--text-sm); } .provider small { color: var(--color-muted); font: var(--text-xs) var(--font-outlier); }
 .provider.claude b { color: var(--harness-claude); } .provider.codex b { color: var(--harness-codex); } .provider.antigravity b { color: var(--harness-antigravity); }
 .ok.big { margin-top: var(--space-sm); font-size: var(--text-sm); }
+.runbar button.stopRun { color: var(--color-bad); border-color: var(--color-bad); }

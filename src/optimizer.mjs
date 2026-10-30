@@ -15,8 +15,8 @@ export const TEMPLATE = {
   direction: 'min',
   parallel: 4,
   strongEvery: 4,
-  maxIterations: 40,
-  budgetMinutes: 60,
+  maxIterations: null,
+  budgetMinutes: null,
   timeoutSec: 300,
 };
 
@@ -105,7 +105,7 @@ export class Optimizer {
   async lane(o) {
     const { run, cfg, archive } = o;
     const sw = this.swarm;
-    while (!run.abort.signal.aborted && o.n < cfg.maxIterations && Date.now() - o.t0 < cfg.budgetMinutes * 60000) {
+    while (!run.abort.signal.aborted && (!cfg.maxIterations || o.n < cfg.maxIterations) && (!cfg.budgetMinutes || Date.now() - o.t0 < cfg.budgetMinutes * 60000)) {
       const iter = ++o.n; const id = `c${iter}`;
       const { parent, island, inspirations } = archive.sample(o.inflight);
       o.inflight.add(parent?.id ?? 'base');
