@@ -28,7 +28,7 @@ const stick = (box, fn) => { const near = box.scrollHeight - box.scrollTop - box
 
 // ---------- terminal ----------
 const termOut = $('#termOut');
-function say(text, cls = '') { stick(termOut, () => { const d = el('div', cls); d.textContent = text; termOut.append(d); }); }
+function say(text, cls = '') { const transcript = $('#terminalTranscript'); stick(transcript, () => { const d = el('div', cls); d.textContent = cls === 'echo' && text.startsWith('❯ ') ? `${S.settings.dir} $ ${text.slice(2)}` : text; termOut.append(d); }); }
 
 // command catalogue drives completion and the suggestion list
 const CATALOG = [
@@ -52,6 +52,21 @@ const CATALOG = [
 const hist = JSON.parse(localStorage.getItem('ratchet.hist') || '[]'); let hi = hist.length;
 const sug = { items: [], sel: -1 };
 const termIn = $('#termIn');
+const commandReference = $('#commandReference');
+const helpButton = $('#commandHelp');
+function closeCommandReference() { commandReference.hidden = true; helpButton.setAttribute('aria-expanded', 'false'); }
+for (const [command, args, description] of CATALOG) {
+  const button = el('button', 'command-reference-item'); button.type = 'button';
+  const name = el('span', 'command-reference-name'); name.textContent = command;
+  const detail = el('span', 'command-reference-detail'); detail.textContent = args ? `${args} · ${description}` : description;
+  button.append(name, detail);
+  button.onclick = () => { if (TT.shell) setShellMode(false); termIn.value = command + (args ? ' ' : ''); closeCommandReference(); termIn.focus(); refreshSuggest(); };
+  $('#commandList').append(button);
+}
+helpButton.onclick = () => { const open = commandReference.hidden; commandReference.hidden = !open; helpButton.setAttribute('aria-expanded', String(open)); };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !commandReference.hidden) { closeCommandReference(); helpButton.focus(); } });
+document.addEventListener('pointerdown', (e) => { if (!commandReference.hidden && !commandReference.contains(e.target) && e.target !== helpButton) closeCommandReference(); });
+
 
 function argChoices(cmd, sub) {
   const runs = [...S.runs.keys()].reverse();
@@ -119,6 +134,7 @@ $('#termForm').addEventListener('submit', async (e) => {
   const line = termIn.value.trim();
   termIn.value = ''; sug.items = []; renderSuggest();
   await submitLine(line);
+  const transcript = $('#terminalTranscript'); transcript.scrollTop = transcript.scrollHeight;
 });
 termIn.addEventListener('keydown', (e) => {
   const open = sug.items.length > 0 && !$('#suggest').hidden;
@@ -147,11 +163,6 @@ document.addEventListener('keydown', (e) => {
   if (TT.tab === 'console') { if (TT.shell) shell.term?.focus(); else termIn.focus(); }
 });
 
-// quick chips
-[['help', 'help'], ['accounts', 'accounts'], ['runs', 'runs'], ['stop all', 'stop all'], ['mode', 'mode'], ['dir recent', 'dir recent']].forEach(([label, line]) => {
-  const b = el('button', 'chipBtn'); b.type = 'button'; b.textContent = label; b.onclick = () => submitLine(line); $('#quick').append(b);
-});
-
 // ---------- terminal tabs, shell, split, expand ----------
 const TT = { tab: 'console', shell: false };
 const shell = { term: null, fit: null, id: null, es: null, dead: false, inputQueue: Promise.resolve() };
@@ -177,7 +188,7 @@ async function openShell() {
 function setShellMode(enabled) {
   TT.shell = enabled;
   $('#terminalShell').hidden = !enabled;
-  $('#termOut').hidden = enabled; $('#termForm').hidden = enabled; $('#quick').hidden = enabled; $('#suggest').hidden = true;
+  $('#terminalTranscript').hidden = enabled; $('#suggest').hidden = true;
   $('#terminalMode').textContent = enabled ? 'Ratchet commands' : 'Open shell';
   $('#terminalMode').setAttribute('aria-pressed', String(enabled));
   if (enabled) openShell().catch(() => say('Could not start the shell.', 'err')); else termIn.focus();
@@ -189,7 +200,7 @@ function setTermTab(tab) {
   $('#consoleView').classList.toggle('on', tab === 'console');
   $('#activityView').classList.toggle('on', tab === 'activity');
   document.querySelectorAll('.ttabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tt === tab))); 
-  $('#terminalMode').hidden = tab !== 'console';
+  $('#terminalMode').hidden = tab !== 'console'; helpButton.hidden = tab !== 'console'; if (tab !== 'console') closeCommandReference();
   if (tab === 'console') { if (TT.shell) { try { shell.fit?.fit(); } catch {} shell.term?.focus(); } else termIn.focus(); }
 }
 document.querySelectorAll('.ttabs button').forEach((b) => { b.onclick = () => setTermTab(b.dataset.tt); });

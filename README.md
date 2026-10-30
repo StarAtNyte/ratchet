@@ -72,7 +72,7 @@ After a restart Ratchet reloads the workspace's earlier runs. A run that was cut
 | --- | --- |
 | Account pool (left) | One card per account: status LED, concurrency pips, current task, jobs done/failed, reset countdown when limited. |
 | Swarm graph (centre) | The lead, workers, sub-agents, verifiers and optimiser candidates as a live graph, in a radial or a left-to-right **tree** layout. Scroll to zoom, drag to pan, double-click or **fit** to see everything, click a node for its details. The strip on top shows the run's status, elapsed time, agent counts, claim verdicts, busy accounts and, for optimiser runs, the best score so far. |
-| Terminal (bottom) | **Terminal**: every action is a command, with suggestions as you type, Tab completion, history and quick-command buttons. The adjacent Activity tab shows agent updates. Choose **Open shell** inside Terminal for an interactive Linux shell, and **Ratchet commands** to return to swarm controls. Drag the divider to resize, or **expand**. |
+| Terminal (bottom) | **Terminal**: every action is a command, with suggestions as you type, Tab completion, and command history. The adjacent Activity tab shows agent updates. Choose **Open shell** inside Terminal for an interactive Linux shell, and **Ratchet commands** to return to swarm controls. Drag the divider to resize, or **expand**. |
 | Agents / Claims / Report (right) | Streaming agent activity; the claim ledger with verdicts; the final Markdown report. |
 
 ## Accounts and harnesses

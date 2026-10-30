@@ -488,3 +488,23 @@ header button.ws { margin-right: auto; max-width: min(42vw, 480px); padding: 6px
   .tacts { gap: 2px; margin-left: auto; }
   .tacts button { white-space: nowrap; font-size: 11px; padding: 5px 6px; }
 }
+
+/* A continuous command transcript with the prompt directly after the output. */
+#terminalTranscript { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-md) var(--space-lg); background: var(--color-paper-3); font: 13px/1.65 var(--font-outlier); }
+#termOut { flex: none; overflow: visible; padding: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+#termOut div.echo { margin-top: var(--space-sm); font-weight: 500; color: var(--color-ink); }
+#termForm { min-height: 0; padding: 0; margin: 0; border: 0; gap: var(--space-xs); font: inherit; }
+#termForm:focus-within { box-shadow: none; border: 0; }
+#termIn { min-width: 0; flex: 1; font: inherit; }
+.prompt-path { max-width: 45%; color: var(--color-accent); }
+#suggest { bottom: auto; top: 48px; }
+@media (max-width: 56rem) { #terminalTranscript { padding: var(--space-sm); } #termForm { padding: 0; } .prompt-path { max-width: 35%; } }
+.command-reference { position: absolute; right: var(--space-md); top: 48px; z-index: var(--z-dropdown); width: min(440px, calc(100vw - 32px)); max-height: min(400px, 70vh); overflow-y: auto; background: var(--color-paper-2); border: 1px solid var(--color-rule-2); border-radius: var(--radius-card); box-shadow: 0 12px 35px var(--shade); }
+.command-reference[hidden] { display: none; }
+.command-reference-head { display: grid; gap: 2px; padding: var(--space-sm); border-bottom: 1px solid var(--color-rule); font: var(--text-xs) var(--font-body); color: var(--color-muted); }
+.command-reference-head strong { color: var(--color-ink); font-size: var(--text-sm); }
+.command-reference-item { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: var(--space-sm); width: 100%; padding: var(--space-xs) var(--space-sm); border: 0; background: transparent; text-align: left; cursor: pointer; }
+.command-reference-item:hover { background: var(--hover); }
+.command-reference-name { color: var(--color-accent); font: var(--text-xs) var(--font-outlier); }
+.command-reference-detail { color: var(--color-ink-2); font: var(--text-xs)/1.45 var(--font-body); }
+@media (max-width: 40rem) { #term .termbar { flex-wrap: wrap; } #term .tacts { gap: 2px; } #term .tacts button { padding-inline: 4px; } }

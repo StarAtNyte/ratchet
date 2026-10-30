@@ -58,21 +58,23 @@
         </div>
         <span class="tcwd" id="tcwd"></span>
         <div class="tacts">
+          <button type="button" id="commandHelp" aria-expanded="false" aria-controls="commandReference">Commands</button>
           <button type="button" id="terminalMode" aria-pressed="false" title="Switch between Ratchet commands and a Linux shell">Open shell</button>
           <button type="button" id="tClear" title="Clear dashboard output">Clear output</button>
           <button type="button" id="tMax">expand</button>
         </div>
       </div>
+      <div id="commandReference" class="command-reference" hidden><div class="command-reference-head"><strong>Ratchet commands</strong><span>Select a command to add it to the prompt</span></div><div id="commandList"></div></div>
       <div class="tview on" id="consoleView">
+        <div id="terminalTranscript">
         <div id="termOut" aria-live="polite" aria-label="Terminal output"></div>
-        <div id="terminalShell" hidden><div id="xterm"></div></div>
-        <div id="suggest" role="listbox" hidden></div>
-        <div class="quick" id="quick"></div>
         <form id="termForm" autocomplete="off">
           <span class="prompt-path" id="promptPath"></span><span class="prompt">$</span>
-          <input id="termIn" aria-label="Terminal command" spellcheck="false" autofocus placeholder="Enter a command · run <task> starts research">
-          <span class="kbd"><kbd>Tab</kbd> complete <kbd>↑</kbd> history <kbd>Ctrl C</kbd> interrupt</span>
+          <input id="termIn" aria-label="Terminal command" spellcheck="false" autofocus>
         </form>
+        </div>
+        <div id="terminalShell" hidden><div id="xterm"></div></div>
+        <div id="suggest" role="listbox" hidden></div>
       </div>
       <div class="tview" id="activityView"><div class="activity-tools" id="activityTools"><span>Agent updates</span><button type="button" id="feedDetail" aria-pressed="false">Show tool calls</button></div><div id="feed"></div><div class="focus" id="focus" hidden></div></div>
     </section>
