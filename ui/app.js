@@ -144,7 +144,7 @@ termIn.addEventListener('keydown', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.target !== document.body) return;
-  if (TT.tab === 'console') termIn.focus();
+  if (TT.tab === 'console') { if (TT.shell) shell.term?.focus(); else termIn.focus(); }
 });
 
 // quick chips
@@ -153,19 +153,49 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------- terminal tabs, shell, split, expand ----------
-const TT = { tab: 'console' };
+const TT = { tab: 'console', shell: false };
+const shell = { term: null, fit: null, id: null, es: null, dead: false, inputQueue: Promise.resolve() };
+const shellPost = (op, data) => fetch(`/api/shell/${op}`, { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify(data) });
+async function openShell() {
+  if (!window.Terminal || !window.FitAddon) { say('Shell unavailable: terminal assets could not be loaded.', 'err'); return; }
+  if (!shell.term) {
+    shell.term = new window.Terminal({ fontFamily: css('--font-outlier') || 'monospace', fontSize: 13, lineHeight: 1.35, cursorBlink: true, scrollback: 5000, theme: { background: '#1f1f21', foreground: '#f0f0f2', cursor: '#f2ad41', selectionBackground: '#4a3514' } });
+    shell.fit = new window.FitAddon.FitAddon(); shell.term.loadAddon(shell.fit); shell.term.open($('#xterm'));
+    shell.term.onData((data) => { if (!shell.dead && shell.id) { const id = shell.id; shell.inputQueue = shell.inputQueue.then(() => shellPost('input', { id, data })).catch(() => { shell.term.writeln('\r\nShell connection lost.'); }); } });
+    new ResizeObserver(() => { if (!TT.shell || TT.tab !== 'console') return; try { shell.fit.fit(); if (shell.id && !shell.dead) shellPost('resize', { id: shell.id, cols: shell.term.cols, rows: shell.term.rows }); } catch {} }).observe($('#terminalShell'));
+  }
+  try { shell.fit.fit(); } catch {}
+  if (!shell.id || shell.dead) {
+    const response = await shellPost('start', { cols: shell.term.cols, rows: shell.term.rows });
+    if (!response.ok) { shell.term.writeln('Could not start the shell.'); return; }
+    const session = await response.json(); shell.id = session.id; shell.dead = false;
+    shell.es?.close(); shell.es = new EventSource(`/api/shell/stream?id=${encodeURIComponent(shell.id)}&t=${encodeURIComponent(token)}`);
+    shell.es.onmessage = (event) => { const message = JSON.parse(event.data); if (message.d) shell.term.write(Uint8Array.from(atob(message.d), (ch) => ch.charCodeAt(0))); if (message.exit) { shell.dead = true; shell.es.close(); shell.term.writeln('\r\nShell exited. Switch away and back to start a new session.'); } };
+  }
+  shell.term.focus();
+}
+function setShellMode(enabled) {
+  TT.shell = enabled;
+  $('#terminalShell').hidden = !enabled;
+  $('#termOut').hidden = enabled; $('#termForm').hidden = enabled; $('#quick').hidden = enabled; $('#suggest').hidden = true;
+  $('#terminalMode').textContent = enabled ? 'Ratchet commands' : 'Open shell';
+  $('#terminalMode').setAttribute('aria-pressed', String(enabled));
+  if (enabled) openShell().catch(() => say('Could not start the shell.', 'err')); else termIn.focus();
+}
+$('#terminalMode').onclick = () => setShellMode(!TT.shell);
 function setTermTab(tab) {
   TT.tab = tab;
   document.querySelectorAll('.ttabs button').forEach((b) => b.classList.toggle('on', b.dataset.tt === tab));
   $('#consoleView').classList.toggle('on', tab === 'console');
   $('#activityView').classList.toggle('on', tab === 'activity');
   document.querySelectorAll('.ttabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tt === tab))); 
-  if (tab === 'console') termIn.focus();
+  $('#terminalMode').hidden = tab !== 'console';
+  if (tab === 'console') { if (TT.shell) { try { shell.fit?.fit(); } catch {} shell.term?.focus(); } else termIn.focus(); }
 }
 document.querySelectorAll('.ttabs button').forEach((b) => { b.onclick = () => setTermTab(b.dataset.tt); });
 function clearOutput() {
   S.clearSeq = S.lastSeq; sessionStorage.setItem(`ratchet.clear.${token}`, String(S.clearSeq));
-  termOut.replaceChildren();
+  termOut.replaceChildren(); shell.term?.clear();
   for (const r of S.runs.values()) { r.feed = []; r.cleared = true; }
   S.current = null; S.focus = null; $('#focus').hidden = true;
   if (drawer) $('#dclose').click();
@@ -265,6 +295,7 @@ function resetPanes() { renderFeed(); renderClaims(); renderReport(); $('#focus'
 function renderHeader() {
   $('#ws').textContent = S.settings.dir;
   $('#tcwd').textContent = S.settings.dir;
+  $('#promptPath').textContent = S.settings.dir;
   $('#mockChip').hidden = !S.settings.mock;
   const m = $('#modeChip'); m.textContent = S.settings.mode; m.classList.toggle('yolo', S.settings.mode === 'yolo');
 }

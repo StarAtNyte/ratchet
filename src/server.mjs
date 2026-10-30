@@ -128,8 +128,8 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       res.write(`data: ${JSON.stringify({ kind: 'hello', settings, commands: COMMANDS, harnesses: HARNESSES, seq: 0, t: Date.now() })}\n\n`);
       for (const e of history) res.write(`data: ${JSON.stringify(e)}\n\n`);
-      pool.publishAll();
       clients.add(res);
+      pool.publishAll();
       if (!mock) for (const a of pool.list().filter((x) => ['claude', 'codex'].includes(x.harness) && x.authed == null && !x.checking)) {
         void execCommand(`account probe ${a.id}`, { say: () => {}, swarm, pool, settings, optimizer, remember });
       }
