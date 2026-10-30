@@ -69,7 +69,7 @@ export class Swarm {
     const id = spec.id;
     const rec = { id, role: spec.role, title: spec.title, parent: spec.parent ?? null, harness: null, account: null };
     run.agents.set(id, rec);
-    this.emit({ kind: 'agent.start', runId: run.id, ...rec, pref: spec.pref });
+    this.emit({ kind: 'agent.start', runId: run.id, ...rec, pref: spec.pref, prompt: String(spec.prompt ?? '').slice(0, 6000) });
     const log = (kind, text) => this.emit({ kind: 'agent.log', runId: run.id, agentId: id, logKind: kind, text });
     let avoid = null;
 

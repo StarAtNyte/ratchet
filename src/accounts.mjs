@@ -53,7 +53,7 @@ export class AccountPool {
 
   list() { return this.accounts; }
   get(id) { return this.accounts.find((a) => a.id === id); }
-  publish(a) { this.emit({ kind: 'account', account: pub(a) }); }
+  publish(a) { this.emit({ kind: 'account', account: { ...pub(a), hint: a.configDir ? this.loginHint(a) : '' } }); }
   publishAll() { this.accounts.forEach((a) => this.publish(a)); }
 
   add(harness) {

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { AccountPool, HOME } from './accounts.mjs';
 import { Swarm } from './swarm.mjs';
 import { Optimizer } from './optimizer.mjs';
+import { HARNESSES } from './harness.mjs';
 import { execCommand, COMMANDS } from './commands.mjs';
 
 const UI = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
@@ -56,7 +57,7 @@ export async function startServer({ dir, port, mock, open }) {
     if (url.pathname === '/api/events') {
       if (!authed(req, url)) return void res.writeHead(401).end();
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-      res.write(`data: ${JSON.stringify({ kind: 'hello', settings, commands: COMMANDS, seq: 0, t: Date.now() })}\n\n`);
+      res.write(`data: ${JSON.stringify({ kind: 'hello', settings, commands: COMMANDS, harnesses: HARNESSES, seq: 0, t: Date.now() })}\n\n`);
       for (const e of history) res.write(`data: ${JSON.stringify(e)}\n\n`);
       pool.publishAll();
       clients.add(res);

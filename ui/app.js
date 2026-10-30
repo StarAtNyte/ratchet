@@ -1,6 +1,6 @@
 const $ = (s) => document.querySelector(s);
 const token = new URLSearchParams(location.search).get('t') ?? '';
-const COLORS = { claude: '#ff9d4d', codex: '#3df5c8', lead: '#e8ecff', bad: '#ff4d5e', none: '#7a8199', ok: '#3dff8a', warn: '#ffd23d' };
+const COLORS = { claude: '#f2956b', codex: '#4fd1c5', antigravity: '#a592f7', lead: '#e8edf7', bad: '#ef6b73', none: '#5f6f93', ok: '#6ad39b', warn: '#f0b45a', accent: '#f0b45a' };
 
 const S = {
   settings: { dir: '', mode: 'auto', slots: 2 },
@@ -63,15 +63,15 @@ function harnessOf(a) { return a.role === 'lead' ? 'lead' : (a.harness ?? 'none'
 // ---------- event reducer ----------
 function apply(ev) {
   switch (ev.kind) {
-    case 'hello': S.settings = ev.settings; S.commands = ev.commands; renderHeader(); break;
+    case 'hello': S.settings = ev.settings; S.commands = ev.commands; S.harnesses = ev.harnesses ?? []; renderHeader(); break;
     case 'settings': S.settings = ev.settings; renderHeader(); break;
     case 'term': say(ev.text, ev.cls); break;
     case 'account': S.accounts.set(ev.account.id, ev.account); renderAccounts(); break;
     case 'account.remove': S.accounts.delete(ev.id); renderAccounts(); break;
     case 'run.start': { const r = run(ev.runId); r.task = ev.task; S.current = ev.runId; S.focus = null; resetPanes(); renderRunbar(); break; }
-    case 'agent.start': { const r = run(ev.runId); r.agents.set(ev.id, { id: ev.id, role: ev.role, title: ev.title, parent: ev.parent, harness: null, account: null, status: 'queued', born: ev.t }); renderRunbar(); break; }
-    case 'agent.assign': { const a = run(ev.runId).agents.get(ev.agentId); if (a) Object.assign(a, { harness: ev.harness, account: ev.account, status: 'running', pulse: ev.t }); break; }
-    case 'agent.failover': { const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.status = 'queued'; a.flash = ev.t; } break; }
+    case 'agent.start': { const r = run(ev.runId); r.agents.set(ev.id, { id: ev.id, role: ev.role, title: ev.title, parent: ev.parent, harness: null, account: null, status: 'queued', born: ev.t, prompt: ev.prompt, failovers: 0, attempts: [] }); renderRunbar(); break; }
+    case 'agent.assign': { const a = run(ev.runId).agents.get(ev.agentId); if (a) { Object.assign(a, { harness: ev.harness, account: ev.account, status: 'running', pulse: ev.t, startedAt: a.startedAt ?? ev.t }); (a.attempts ??= []).push(ev.account); } break; }
+    case 'agent.failover': { const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.status = 'queued'; a.flash = ev.t; a.failovers = (a.failovers ?? 0) + 1; } break; }
     case 'agent.end': {
       const a = run(ev.runId).agents.get(ev.agentId);
       if (a) { a.status = ev.ok ? 'done' : 'failed'; a.error = ev.error; a.endedAt = ev.t; }
@@ -100,7 +100,7 @@ function apply(ev) {
     case 'run.report': { const r = run(ev.runId); r.report = ev.markdown; if (ev.runId === S.current) renderReport(); break; }
     case 'run.end': { const r = run(ev.runId); r.status = ev.status; if (ev.note) say(`run ${ev.runId} ${ev.status}: ${ev.note}`, 'err'); else say(`run ${ev.runId} ${ev.status}`, ev.status === 'done' ? 'ok' : 'warn'); renderRunbar(); break; }
   }
-  renderStats();
+  renderStats(); scheduleLists();
 }
 
 function resetPanes() { $('#feed').innerHTML = ''; renderClaims(); renderReport(); $('#focus').hidden = true; }
@@ -117,7 +117,7 @@ function renderStats() {
   const run_ = r ? [...r.agents.values()].filter((a) => a.status === 'running').length : 0;
   const cl = r ? [...r.claims.values()] : [];
   const n = (v) => cl.filter((c) => c.verdict === v).length;
-  $('#stats').innerHTML = [['AGENTS', r ? r.agents.size : 0], ['ACTIVE', run_], ['CLAIMS', cl.length], ['CONFIRMED', n('confirmed')], ['REFUTED', n('refuted')]]
+  $('#stats').innerHTML = [['agents', r ? r.agents.size : 0], ['active', run_], ['claims', cl.length], ['confirmed', n('confirmed')], ['refuted', n('refuted')]]
     .map(([k, v]) => `<div class="stat"><b>${v}</b><small>${k}</small></div>`).join('');
   $('#claimN').textContent = cl.length;
   $('#graphEmpty').classList.toggle('hide', !!r);
@@ -146,6 +146,7 @@ function renderAccounts() {
       <div class="task">${esc(a.task ?? (a.status === 'limited' ? 'rate limited' : 'idle'))}</div>
       <div class="row"><span class="pips">${pips}</span><span>${a.done}✓ ${a.failed ? a.failed + '✗' : ''}</span>
         <span class="${a.status === 'limited' ? 'cd' : a.authed === false ? 'auth-no' : ''}" data-until="${a.limitedUntil || 0}">${a.authed === false ? 'not logged in' : ''}</span></div>`);
+    d.onclick = () => openAccount(a.id);
     list.append(d);
   }
   tickCountdowns();
@@ -165,7 +166,7 @@ function addFeed(f) {
   stick(box, () => {
     const row = el('div', `ln ${f.kind}`);
     const who = el('span', `who ${f.harness}`); who.textContent = f.id;
-    who.onclick = () => focusAgent(f.id);
+    who.onclick = () => openAgent(f.id);
     const tx = el('span', 'tx'); tx.textContent = f.text;
     row.append(who, tx); box.append(row);
     while (box.childElementCount > 500) box.firstChild.remove();
@@ -240,7 +241,7 @@ function targets(r) {
     });
   };
   place('lead', 0, 0, 0);
-  if (r.agents.has('synth')) out.set('synth', { x: cx, y: cy + m * 0.1, ang: Math.PI / 2 });
+  if (r.agents.has('synth')) out.set('synth', { x: cx, y: cy + m * 0.15, ang: Math.PI / 2 });
   return out;
 }
 
@@ -249,15 +250,33 @@ function frame(t) {
   requestAnimationFrame(frame);
   ctx.clearRect(0, 0, W, H);
   const r = cur();
-  // radar rings + sweep
   const cx = W / 2; const cy = H / 2 + 6; const m = Math.min(W, H);
-  ctx.strokeStyle = 'rgba(61,245,200,.06)'; ctx.lineWidth = 1;
+  // instrument-dial backdrop: hairline rings, degree ticks, and a slowly turning ratchet wheel
+  ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(150,164,194,.12)';
   [0.13, 0.27, 0.4].forEach((k) => { ctx.beginPath(); ctx.arc(cx, cy, m * k, 0, 7); ctx.stroke(); });
-  const sw = (t / 4000) % (Math.PI * 2);
-  const g = ctx.createConicGradient ? ctx.createConicGradient(sw, cx, cy) : null;
-  if (g) { g.addColorStop(0, 'rgba(61,245,200,.10)'); g.addColorStop(0.08, 'rgba(61,245,200,0)'); g.addColorStop(1, 'rgba(61,245,200,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, m * 0.42, 0, 7); ctx.fill(); }
+  for (let i = 0; i < 72; i++) { const an = (i / 72) * Math.PI * 2; const r0 = m * 0.4; const r1 = r0 + (i % 6 === 0 ? 9 : 4); ctx.beginPath(); ctx.moveTo(cx + Math.cos(an) * r0, cy + Math.sin(an) * r0); ctx.lineTo(cx + Math.cos(an) * r1, cy + Math.sin(an) * r1); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(240,180,90,.16)'; ctx.beginPath();
+  const teeth = 28; const rot = t / 60000;
+  for (let i = 0; i < teeth; i++) {
+    const a0 = rot + (i / teeth) * Math.PI * 2; const a1 = a0 + (0.8 / teeth) * Math.PI * 2; const a2 = a0 + (1 / teeth) * Math.PI * 2;
+    const ri = m * 0.085; const ro = m * 0.105;
+    if (i === 0) ctx.moveTo(cx + Math.cos(a0) * ri, cy + Math.sin(a0) * ri);
+    ctx.lineTo(cx + Math.cos(a1) * ro, cy + Math.sin(a1) * ro); ctx.lineTo(cx + Math.cos(a1) * ri, cy + Math.sin(a1) * ri); ctx.lineTo(cx + Math.cos(a2) * ri, cy + Math.sin(a2) * ri);
+  }
+  ctx.closePath(); ctx.stroke();
   if (!r) return;
 
+  const sc = [...r.agents.values()].filter((a) => a.score != null && Number.isFinite(a.score) && a.ok !== false).sort((x, y) => (parseInt(x.id.slice(1)) || 0) - (parseInt(y.id.slice(1)) || 0));
+  if (sc.length > 1) {
+    const vals = sc.map((a) => a.score); const asc = vals[vals.length - 1] >= vals[0];
+    let best = vals[0]; const curve = vals.map((v) => (best = asc ? Math.max(best, v) : Math.min(best, v)));
+    const lo = Math.min(...vals); const hi = Math.max(...vals); const bx = W - 190; const by = H - 70; const bw = 170; const bh = 48;
+    ctx.fillStyle = 'rgba(10,15,29,.7)'; ctx.strokeStyle = '#263558'; ctx.beginPath(); ctx.roundRect(bx - 10, by - 22, bw + 20, bh + 34, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#96a4c2'; ctx.font = 'italic 11px Georgia, serif'; ctx.textAlign = 'left'; ctx.fillText(`best ${curve[curve.length - 1].toFixed(3)} · ${sc.length} tries`, bx, by - 8);
+    const X = (i) => bx + (i / (curve.length - 1)) * bw; const Y = (v) => by + bh - ((v - lo) / (hi - lo || 1)) * bh;
+    ctx.strokeStyle = 'rgba(150,164,194,.35)'; ctx.lineWidth = 1; ctx.beginPath(); vals.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
+    ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.8; ctx.beginPath(); curve.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)))); ctx.stroke();
+  }
   const tg = targets(r);
   for (const a of r.agents.values()) {
     const tp = tg.get(a.id); if (!tp) continue;
@@ -278,14 +297,7 @@ function frame(t) {
     ctx.strokeStyle = a.status === 'failed' ? 'rgba(255,77,94,.35)' : a.status === 'done' ? col + '55' : col + '33';
     ctx.lineWidth = a.status === 'running' ? 1.6 : 1;
     ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.quadraticCurveTo(mx, my, n.x, n.y); ctx.stroke();
-    if (a.status === 'running') {
-      for (let i = 0; i < 3; i++) {
-        const u = ((t / 1100 + i / 3 + n.seed) % 1);
-        const x = (1 - u) * (1 - u) * p.x + 2 * (1 - u) * u * mx + u * u * n.x;
-        const y = (1 - u) * (1 - u) * p.y + 2 * (1 - u) * u * my + u * u * n.y;
-        ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 10; ctx.beginPath(); ctx.arc(x, y, 2.2, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
-      }
-    }
+    if (a.status === 'running') { ctx.setLineDash([4, 6]); ctx.lineDashOffset = -t / 40; ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.quadraticCurveTo(mx, my, n.x, n.y); ctx.stroke(); ctx.setLineDash([]); }
   }
 
   // nodes
@@ -298,27 +310,26 @@ function frame(t) {
     const pop = Math.min(1, age / 400); const rad = base * (0.4 + 0.6 * pop);
     if (a.status === 'running') {
       const k = (t / 900 + n.seed) % 1;
-      ctx.strokeStyle = col; ctx.globalAlpha = 1 - k; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(n.x, n.y, rad + k * 22, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = col; ctx.globalAlpha = (1 - k) * 0.5; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(n.x, n.y, rad + k * 12, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
     }
     if (a.status === 'queued') { ctx.setLineDash([3, 4]); }
-    ctx.shadowColor = col; ctx.shadowBlur = a.status === 'running' ? 22 : a.status === 'done' ? 10 : 4;
-    ctx.fillStyle = a.status === 'done' ? col : '#0a0c14'; ctx.strokeStyle = col; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(n.x, n.y, rad, 0, 7); ctx.fill(); ctx.stroke(); ctx.setLineDash([]); ctx.shadowBlur = 0;
-    if (a.status === 'done') { ctx.strokeStyle = '#05060a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(n.x - rad * 0.4, n.y); ctx.lineTo(n.x - rad * 0.1, n.y + rad * 0.35); ctx.lineTo(n.x + rad * 0.45, n.y - rad * 0.3); ctx.stroke(); }
+        ctx.fillStyle = a.status === 'done' ? col : '#0a0f1d'; ctx.strokeStyle = col; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(n.x, n.y, rad, 0, 7); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+    if (a.status === 'done') { ctx.strokeStyle = '#0a0f1d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(n.x - rad * 0.4, n.y); ctx.lineTo(n.x - rad * 0.1, n.y + rad * 0.35); ctx.lineTo(n.x + rad * 0.45, n.y - rad * 0.3); ctx.stroke(); }
     if (a.status === 'failed') { ctx.strokeStyle = COLORS.bad; ctx.beginPath(); ctx.moveTo(n.x - 4, n.y - 4); ctx.lineTo(n.x + 4, n.y + 4); ctx.moveTo(n.x + 4, n.y - 4); ctx.lineTo(n.x - 4, n.y + 4); ctx.stroke(); }
-    if (a.flash && t - a.flash < 600) { ctx.strokeStyle = COLORS.warn; ctx.globalAlpha = 1 - (t - a.flash) / 600; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(n.x, n.y, rad + 8 + (t - a.flash) / 40, 0, 7); ctx.stroke(); ctx.globalAlpha = 1; }
-    ctx.fillStyle = S.focus === a.id ? '#fff' : '#9aa3c4'; ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'center';
+    const fl = Date.now() - (a.flash ?? 0); if (a.flash && fl < 600) { ctx.strokeStyle = COLORS.warn; ctx.globalAlpha = 1 - fl / 600; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(n.x, n.y, rad + 8 + fl / 40, 0, 7); ctx.stroke(); ctx.globalAlpha = 1; }
+    ctx.fillStyle = S.focus === a.id ? '#fff' : '#96a4c2'; ctx.font = 'italic 12px Georgia, serif'; ctx.textAlign = 'center';
     ctx.fillText(a.id === 'lead' ? 'LEAD' : a.id, n.x, n.y + rad + 13);
-    if (a.score != null && Number.isFinite(a.score)) { ctx.fillStyle = a.champion ? COLORS.warn : '#7e87a8'; ctx.font = '9px ui-monospace, monospace'; ctx.fillText(Number(a.score).toFixed(3), n.x, n.y + rad + 35); }
-    if (a.champion) { ctx.strokeStyle = COLORS.warn; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(n.x, n.y, rad + 5, 0, 7); ctx.stroke(); }
-    if (a.account) { ctx.fillStyle = col + 'aa'; ctx.font = '9px ui-monospace, monospace'; ctx.fillText(a.account, n.x, n.y + rad + 24); }
+    if (a.score != null && Number.isFinite(a.score)) { ctx.fillStyle = a.champion ? COLORS.warn : '#7e87a8'; ctx.font = '10px ui-sans-serif, system-ui, sans-serif'; ctx.fillText(Number(a.score).toFixed(3), n.x, n.y + rad + 35); }
+    if (a.champion) { ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(n.x, n.y, rad + 5, 0, 7); ctx.stroke(); ctx.fillStyle = COLORS.accent; ctx.beginPath(); ctx.moveTo(n.x, n.y - rad - 12); ctx.lineTo(n.x + 3.5, n.y - rad - 7); ctx.lineTo(n.x - 3.5, n.y - rad - 7); ctx.closePath(); ctx.fill(); }
+    if (a.account) { ctx.fillStyle = col + 'aa'; ctx.font = '10px ui-sans-serif, system-ui, sans-serif'; ctx.fillText(a.account, n.x, n.y + rad + 24); }
     if (Math.hypot(mouse.x - n.x, mouse.y - n.y) < rad + 6) hover = a;
   }
   if (hover) {
     const label = `${hover.title ?? hover.id}${hover.account ? '  ·  ' + hover.account : ''}  ·  ${hover.status}`;
-    ctx.font = '11px ui-monospace, monospace'; const w = ctx.measureText(label).width + 16;
+    ctx.font = '12px ui-sans-serif, system-ui, sans-serif'; const w = ctx.measureText(label).width + 16;
     const x = Math.min(Math.max(mouse.x - w / 2, 6), W - w - 6); const y = mouse.y - 34;
-    ctx.fillStyle = 'rgba(5,6,10,.92)'; ctx.strokeStyle = '#2a3050'; ctx.beginPath(); ctx.roundRect(x, y, w, 22, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#131d36'; ctx.strokeStyle = '#263558'; ctx.beginPath(); ctx.roundRect(x, y, w, 22, 5); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(label, x + 8, y + 15);
   }
   cv.style.cursor = hover ? 'pointer' : 'crosshair';
@@ -326,7 +337,7 @@ function frame(t) {
 const mouse = { x: -99, y: -99 };
 cv.addEventListener('mousemove', (e) => { const r = cv.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; });
 cv.addEventListener('mouseleave', () => { mouse.x = mouse.y = -99; });
-cv.addEventListener('click', () => { if (hover) focusAgent(hover.id); });
+cv.addEventListener('click', () => { if (hover) openAgent(hover.id); });
 requestAnimationFrame(frame);
 
 // ---------- clock + connection ----------
@@ -379,3 +390,98 @@ $('#pickNew').onclick = async () => {
   closePicker();
 };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#picker').hidden) closePicker(); });
+
+// ---------- agents tab, drawers, add account ----------
+const fmtDur = (ms) => (ms < 1000 ? '0s' : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`);
+let listsQueued = false;
+function scheduleLists() { if (listsQueued) return; listsQueued = true; requestAnimationFrame(() => { listsQueued = false; renderAgents(); refreshDrawer(); }); }
+
+function renderAgents() {
+  const box = $('#agents'); const r = cur();
+  $('#agentN').textContent = r ? r.agents.size : 0;
+  if (S.tab !== 'agents') return;
+  box.innerHTML = '';
+  if (!r || !r.agents.size) { box.append(el('div', 'muted', 'no agents yet')); return; }
+  [...r.agents.values()].forEach((a) => {
+    const col = a.status === 'failed' ? COLORS.bad : COLORS[harnessOf(a)] ?? COLORS.none;
+    const row = el('div', 'arow', `<span class="dot" style="background:${col}"></span><span class="m">${esc(a.id)}</span><span class="t">${esc(a.title ?? a.role)}<span class="m"> · ${esc(a.account ?? 'waiting')}</span></span><span class="pill ${a.status}">${a.score != null && Number.isFinite(a.score) ? Number(a.score).toFixed(3) : a.status}</span>`);
+    row.onclick = () => openAgent(a.id);
+    box.append(row);
+  });
+}
+document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', renderAgents));
+
+let drawer = null;
+function openAccount(id) { drawer = { type: 'account', id }; $('#drawer').hidden = false; refreshDrawer(); }
+function openAgent(id) { drawer = { type: 'agent', id }; $('#drawer').hidden = false; refreshDrawer(); }
+$('#dclose').onclick = () => { drawer = null; $('#drawer').hidden = true; };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer && $('#picker').hidden) $('#dclose').click(); });
+
+const kv = (rows) => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
+function refreshDrawer() {
+  if (!drawer) return;
+  const body = $('#dbody'); const keep = body.scrollTop;
+  if (drawer.type === 'account') {
+    const a = S.accounts.get(drawer.id);
+    if (!a) { $('#dclose').click(); return; }
+    $('#dtitle').textContent = a.id;
+    const jobs = [];
+    for (const r of S.runs.values()) for (const g of r.agents.values()) if (g.account === a.id || g.attempts?.includes(a.id)) jobs.push({ r, g });
+    const left = a.limitedUntil && a.limitedUntil > Date.now() ? `${fmtDur(a.limitedUntil - Date.now())} (until ${new Date(a.limitedUntil).toLocaleTimeString()})` : '-';
+    body.innerHTML = kv([
+      ['harness', esc(a.harness)], ['status', `<span class="pill ${a.status === 'working' ? 'running' : a.status === 'limited' ? 'failed' : 'done'}">${esc(a.status)}</span>`],
+      ['logged in', a.authed === true ? 'yes' : a.authed === false ? 'no' : 'unknown (run probe)'],
+      ['slots in use', `${a.load} / ${S.settings.slots}`], ['jobs done', a.done], ['jobs failed', a.failed],
+      ['limit resets in', esc(left)], ['current task', esc(a.task ?? '-')], ['config folder', esc(a.configDir ?? '(default login)')],
+    ]) + (a.hint ? `<div class="dsec">Sign in</div><div class="dpre">${esc(a.hint)}</div><div class="dacts"><button class="dact" data-act="copy">copy command</button>${a.harness === 'codex' ? '<button class="dact" data-act="login">log in here</button>' : ''}</div>` : '<div class="muted2">Uses your existing CLI login.</div>')
+      + `<div class="dacts"><button class="dact" data-act="probe">check login</button><button class="dact" data-act="rm">remove account</button></div>`
+      + `<div class="dsec">Recent jobs (${jobs.length})</div><div class="dlist">${jobs.slice(-12).reverse().map(({ r, g }, i) => `<div data-job="${r.id}/${g.id}"><span>${esc(r.id)} · ${esc(g.id)} · ${esc(g.title ?? '')}</span><span class="pill ${g.status}">${g.status}</span></div>`).join('') || '<div class="muted2">none yet</div>'}</div>`;
+    body.querySelectorAll('[data-act]').forEach((b) => { b.onclick = () => {
+      const act = b.dataset.act;
+      if (act === 'copy') navigator.clipboard?.writeText(a.hint);
+      else if (act === 'rm') { if (confirm(`Remove ${a.id}?`)) { sendCmd(`account rm ${a.id}`); $('#dclose').click(); } }
+      else sendCmd(`account ${act} ${a.id}`);
+    }; });
+    body.querySelectorAll('[data-job]').forEach((d) => { d.onclick = () => { const [rid, gid] = d.dataset.job.split('/'); S.current = rid; renderRunbar(); openAgent(gid); }; });
+  } else {
+    const r = cur(); const a = r?.agents.get(drawer.id);
+    if (!a) return;
+    $('#dtitle').textContent = `${a.id} · ${a.title ?? a.role}`;
+    const logs = r.feed.filter((f) => f.id === a.id);
+    const claims = [...r.claims.values()].filter((c) => c.agent === a.id);
+    const dur = a.startedAt ? fmtDur((a.endedAt ?? Date.now()) - a.startedAt) : '-';
+    body.innerHTML = kv([
+      ['role', esc(a.role)], ['status', `<span class="pill ${a.status}">${esc(a.status)}</span>`],
+      ['parent', a.parent ? `<a href="#" data-ag="${esc(a.parent)}">${esc(a.parent)}</a>` : '-'],
+      ['harness', esc(a.harness ?? 'not assigned')], ['account', a.account ? `<a href="#" data-acc="${esc(a.account)}">${esc(a.account)}</a>` : 'waiting for a free account'],
+      ['accounts tried', esc((a.attempts ?? []).join(' > ') || '-')], ['failovers', a.failovers ?? 0], ['duration', dur],
+      ...(a.score != null ? [['score', Number.isFinite(a.score) ? Number(a.score).toFixed(4) : 'failed'], ['family', esc(a.family ?? '')], ['idea', esc(a.idea ?? '')], ['champion', a.champion ? 'yes' : 'no']] : []),
+      ...(a.error ? [['error', esc(a.error)]] : []),
+    ])
+      + (claims.length ? `<div class="dsec">Claims (${claims.length})</div>${claims.map((c) => `<div class="claim ${c.verdict}"><div class="h"><span>${esc(c.id)}</span><span class="badge">${c.verdict.toUpperCase()}</span></div><div class="t">${esc(c.text)}</div>${c.note ? `<div class="note">${esc(c.note)}</div>` : ''}</div>`).join('')}` : '')
+      + `<div class="dsec">Activity (${logs.length})</div><div class="dpre">${logs.map((f) => `${f.kind === 'tool' ? '> ' : f.kind === 'err' ? '! ' : ''}${esc(f.text)}`).join('\n') || 'no output yet'}</div>`
+      + (a.prompt ? `<div class="dsec">Prompt</div><div class="dpre">${esc(a.prompt)}</div>` : '');
+    body.querySelectorAll('[data-ag]').forEach((x) => { x.onclick = (e) => { e.preventDefault(); openAgent(x.dataset.ag); }; });
+    body.querySelectorAll('[data-acc]').forEach((x) => { x.onclick = (e) => { e.preventDefault(); openAccount(x.dataset.acc); }; });
+  }
+  body.scrollTop = keep;
+}
+
+const HARNESS_NOTE = { claude: 'Claude Code (headless)', codex: 'Codex via SDK', antigravity: 'Antigravity CLI (experimental isolation)', gemini: 'Gemini CLI', opencode: 'OpenCode' };
+$('#addAcc').onclick = () => {
+  const box = $('#harnessPick'); box.innerHTML = '';
+  (S.harnesses?.length ? S.harnesses : ['claude', 'codex', 'antigravity']).forEach((h) => {
+    const b = el('button', '', `${esc(h)}<small>${esc(HARNESS_NOTE[h] ?? 'custom harness')}</small>`); b.type = 'button';
+    b.onclick = async () => {
+      const before = new Set(S.accounts.keys());
+      await sendCmd(`account add ${h}`);
+      $('#addModal').hidden = true;
+      setTimeout(() => { const n = [...S.accounts.keys()].find((k) => !before.has(k)); if (n) openAccount(n); }, 300);
+    };
+    box.append(b);
+  });
+  $('#addModal').hidden = false;
+};
+$('#addCancel').onclick = () => { $('#addModal').hidden = true; };
+$('#addModal').addEventListener('mousedown', (e) => { if (e.target.id === 'addModal') $('#addModal').hidden = true; });
+setInterval(() => { if (drawer && drawer.type === 'agent') refreshDrawer(); }, 2000);
