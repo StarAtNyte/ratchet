@@ -8,14 +8,14 @@ import { HARNESSES, mergeEnv } from './harness.mjs';
 import { TEMPLATE } from './optimizer.mjs';
 import { writeFileSync } from 'node:fs';
 
-export const COMMANDS = ['help', 'run', 'follow', 'resume', 'opt', 'forge', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
+export const COMMANDS = ['help', 'run', 'follow', 'resume', 'opt', 'kernel', 'forge', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
 
 const HELP = [
   ['run <task>', 'launch a research swarm'],
   ['follow <instruction>', 'queue an instruction for the active swarm’s next agent turns'],
   ['cd [path]', 'change the current workspace directory'],
   ['<command>', 'run a non-interactive shell command in the workspace'],
-  ['forge setup | status | check <task> | start <task> [task...]', 'run kernel optimization campaigns'],
+  ['kernel list | check <task> | run <task> [task...]', 'run kernel optimization campaigns'],
   ['opt init|start [goal]|apply', 'evolutionary optimise loop on ratchet.json (archive, ratchet, holdout)'],
   ['dir [path|n]', 'show/change workspace (also: click the path in the header); dir recent, dir mk <path>'],
   ['accounts', 'list the account pool'],
@@ -48,16 +48,18 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
     case 'clear':
       return;
 
+    case 'kernel':
     case 'forge': {
       const [sub, ...args] = rest;
       let tasks = args; let device = null;
       if (args[0] === '--device') { device = args[1]; tasks = args.slice(2); if (!device) return say('usage: --device modal:<GPU> | local:<index>', 'err'); }
       if (!forge) return say('ForgeKernel integration is unavailable.', 'err');
+      if (sub === 'list' && !tasks.length) { const available = forge.listTasks(); return say(available.length ? available.map((task) => `  ${task.value}`).join('\n') : 'No built-in kernel tasks found.', 'dim'); }
       if (sub === 'status' && !tasks.length) return say(`Ratchet kernel engine: ${forge.root} · runtime: ${forge.binary}`, 'dim');
       if (sub === 'setup' && !tasks.length) { try { await forge.ensureRuntime(); return say('Ratchet kernel runtime is ready.', 'ok'); } catch (e) { return say(e.message, 'err'); } }
-      if (!tasks.length || !['start', 'check'].includes(sub)) return say('usage: forge setup | status | check <task> | start <task> [task...]', 'err');
+      if (!tasks.length || !['run', 'start', 'check'].includes(sub)) return say('usage: kernel list | setup | status | check [--device <device>] <task> | run [--device <device>] <task> [task...]', 'err');
       if (sub === 'check') { try { const result = await forge.check(tasks.join(' '), settings.dir, device); return say(result.ok ? result.output : result.error, result.ok ? 'ok' : 'err'); } catch (e) { return say(e.message, 'err'); } }
-      try { const run = forge.start(tasks, device); return say(`ForgeKernel swarm ${run.id} launched with ${tasks.length} campaign(s).`, 'ok'); } catch (e) { return say(e.message, 'err'); }
+      try { const run = forge.start(tasks, device); return say(`Kernel optimization swarm ${run.id} launched with ${tasks.length} campaign(s).`, 'ok'); } catch (e) { return say(e.message, 'err'); }
     }
 
     case 'opt': {

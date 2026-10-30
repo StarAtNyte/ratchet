@@ -185,9 +185,10 @@ test('forge terminal commands pass the selected device to campaigns', async () =
   const calls = []; const output = [];
   const forge = { check: async (...args) => { calls.push(['check', ...args]); return { ok: true, output: 'ready' }; }, start: (...args) => { calls.push(['start', ...args]); return { id: 'r1' }; } };
   const ctx = { forge, settings: { dir: '/workspace' }, say: (s) => output.push(s) };
-  await execCommand('forge check --device modal:B200 /tasks/a', ctx);
+  await execCommand('kernel check --device modal:B200 /tasks/a', ctx);
+  await execCommand('kernel run --device modal:H200 /tasks/a', ctx);
   await execCommand('forge start --device local:1 /tasks/a /tasks/b', ctx);
-  assert.deepEqual(calls, [['check', '/tasks/a', '/workspace', 'modal:B200'], ['start', ['/tasks/a', '/tasks/b'], 'local:1']]);
+  assert.deepEqual(calls, [['check', '/tasks/a', '/workspace', 'modal:B200'], ['start', ['/tasks/a'], 'modal:H200'], ['start', ['/tasks/a', '/tasks/b'], 'local:1']]);
 });
 
 test('kernel campaigns resume on another account after a detected usage limit', async () => {
