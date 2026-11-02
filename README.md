@@ -68,12 +68,15 @@ After a restart Ratchet reloads the workspace's earlier runs. A run that was cut
 
 ## The UI
 
+The screen is built to stay calm while dozens of agents run. Details appear only when you ask for them.
+
 | Area | What it shows |
 | --- | --- |
-| Account pool (left) | One card per account: status LED, concurrency pips, current task, jobs done/failed, reset countdown when limited. |
-| Swarm graph (centre) | The lead, workers, sub-agents, verifiers and optimiser candidates as a live graph, in a radial or a left-to-right **tree** layout. Scroll to zoom, drag to pan, double-click or **fit** to see everything, click a node for its details. The strip on top shows the run's status, elapsed time, agent counts, claim verdicts, busy accounts and, for optimiser runs, the best score so far. |
-| Terminal (bottom) | **Terminal**: every action is a command, with suggestions as you type, Tab completion, and command history. The adjacent Activity tab shows agent updates. Choose **Open shell** inside Terminal for an interactive Linux shell, and **Ratchet commands** to return to swarm controls. Drag the divider to resize, or **expand**. |
-| Agents / Claims / Report (right) | Streaming agent activity; the claim ledger with verdicts; the final Markdown report. |
+| Header | Workspace folder (click to change), and for the selected run: round, elapsed time, tokens and reported cost. Chips show mock mode, the permission level and the connection. |
+| Accounts (left) | One compact row per account: provider colour, status (idle, working, limited, signed out), a load bar while it is busy and a countdown when it is limited. Drag a row to **Not using** to keep work off it. **+ Add** opens a two-step wizard: choose the provider, then sign in. |
+| Run header and graph (centre) | The task, its status and one line of numbers (agents running, claims confirmed and refuted, quality score), with **Stop**, **Resume** and **Add instruction**. Below it the swarm as a tree of readable cards; scroll to zoom, drag to pan, **Fit** to see everything, click a card to inspect it. |
+| Activity and Terminal (bottom) | **Activity** (the default) streams agent updates; tool calls are hidden until you ask. **Terminal** takes every command with suggestions and Tab completion, and **Open shell** gives a real shell in the workspace. |
+| Agents, Claims, Report (right) | Agents grouped by phase (Plan, Research, Verify, Rank and report). Clicking one opens the **inspector**: its account card (provider, email, model, slots, jobs, sign-in state, limit reset), the attempts timeline across accounts, its claims with verdicts, activity, result and prompt. |
 
 ## Accounts and harnesses
 
@@ -120,15 +123,20 @@ Open the **Agents** tab and click **+ Add agent**: pick `auto`, `claude`, `codex
 ## Research swarm
 
 ```
-run <your task>        # launch research
+run <your task>        # launch research; rounds continue until you stop them (set rounds <n> to cap)
+follow <instruction>   # steer the agents that have not started yet, and later rounds
 ```
 
-1. **Plan.** A lead inspects the workspace and splits the task into independent lines of attack, each tagged with a preferred harness. Known dead ends from earlier runs (`.ratchet/memory.jsonl`) are included so it does not repeat them.
-2. **Research.** Workers run in parallel on the account pool. A worker may spawn up to three sub-agents (depth 2); their claims merge into its own.
-3. **Verify.** Each worker's claims are checked by an agent from a different harness, which returns `confirmed`, `refuted` or `unclear` per claim.
-4. **Synthesise.** The lead writes `REPORT.md`: confirmed claims stated plainly, unclear ones flagged, refuted ones listed as dead ends, with claim ids cited. Refuted claims are saved to memory.
+Each round runs six steps. The methods come from recent work on multi-agent research and are cited in `src/methods.mjs`.
 
-Everything is written under `<workspace>/.ratchet/runs/<id>/`: `findings/`, `claims.json`, `REPORT.md`.
+1. **Plan with effort scaling.** The lead classifies the question as simple (1 to 2 lines of attack), comparison (2 to 4) or complex (up to `workers`), and gives every line an objective, non-goals, a deliverable, a stop condition, a preferred harness and a difficulty. Earlier dead ends, the previous round's report and its meta-review are fed in. (Anthropic, *How we built our multi-agent research system*.)
+2. **Research with structured briefs.** Each researcher sees its siblings' titles so lines do not overlap, and gets a tool-call budget from its difficulty. Only high-difficulty lines may open sub-investigations (up to three). Researchers are told not to read each other's notes; a researcher whose tool calls touch another's notes gets a strike.
+3. **Verify across model families, with evidence.** Each researcher's claims go to an agent from a different harness. A confirmation must quote its evidence (a source passage or a command and its decisive output) or it is downgraded to unclear. Cited local files that do not exist, or evidence a verifier marks as fabricated, give strikes; two strikes quarantine all of that researcher's claims. (Graduated sanctions from the 2026 study of cheating in research swarms, arXiv 2609.04170.)
+4. **Rank in a tournament.** Near-duplicate findings are merged, then a judge compares surviving findings pairwise and Elo ratings order them. (Google AI co-scientist.)
+5. **Synthesise with a meta-review.** The report leads with the highest-ranked confirmed findings, flags unverified ones and lists refuted ones as dead ends. A meta-review of recurring weaknesses and the best next lines goes to the next round's planner.
+6. **Score the round.** A rubric judge rates accuracy, citations, completeness, sources and efficiency. `scores` lists every round so you can compare rounds and settings over time.
+
+Everything is written under `<workspace>/.ratchet/runs/<id>/`: `events.jsonl`, `findings/`, `claims.json`, `REPORT.md`, `score.json`. Runs survive restarts: an interrupted run shows a **Resume** button, and agents that already finished are restored instead of re-run.
 
 ## Optimise loop: the ratchet
 
@@ -161,11 +169,12 @@ opt apply      # copy the champion's target files into the workspace
 
 How it works:
 
-- **Program archive.** Valid programs are kept in cells keyed by island and method family. Parents are rank-sampled (70% exploit, 30% explore), and prompts include inspirations from other families, to keep diversity.
+- **Program archive.** Valid programs are kept in cells keyed by island and method family. Parents are sampled by rank (70% exploit, 30% explore) weighted by 1/(1 + offspring), so good but under-explored programs get chances (ShinkaEvolve). Prompts include inspirations from other families and the parent's own evaluation output.
 - **The ratchet.** A candidate becomes champion only if it is valid and strictly better. If `holdout` is set, it must also not regress on it. Agents never see holdout scores.
 - **Fixed evaluator.** Each mutation works in a private copy of the workspace. For scoring, only the declared `targets` are overlaid onto a clean copy, so edits to the evaluator, tests or data are ignored.
 - **Evaluation cascade.** Cheap checks come first in `eval`; expensive stages run only if earlier ones pass. Evaluations run one at a time so benchmarks get exclusive hardware.
-- **Model tiering.** Most mutations go to the fast lane; every `strongEvery`-th goes to a strong model.
+- **Novelty gate.** A candidate that is a near-copy of a recent program is rejected before it costs an evaluation, and the rejection is logged as a failed idea.
+- **Model choice.** Every `strongEvery`-th mutation goes to the strong model; the rest are assigned by a UCB1 bandit over the available harnesses, rewarded when a child beats its parent.
 - **Memory.** Failed ideas are logged to `failures.jsonl` and fed to later workers; parents currently being mutated are avoided to reduce duplicate work.
 
 Output lives in `<workspace>/.ratchet/runs/<id>/opt/`: `archive.json`, `failures.jsonl`, `snap/<candidate>/`, and a `REPORT.md` with the improvement over baseline.
@@ -175,24 +184,29 @@ Output lives in `<workspace>/.ratchet/runs/<id>/opt/`: `archive.json`, `failures
 | Command | Does |
 | --- | --- |
 | `run <task>` | Launch a research swarm |
-| `follow <instruction>` | Queue instructions for subsequent agent turns and rounds |
+| `follow <instruction>` | Queue instructions for subsequent agents and rounds |
+| `resume <run>` | Re-run an interrupted research run, restoring finished agents |
+| `scores` | Quality of each research round in this workspace |
 | `opt init \| start [goal] \| apply` | Optimise loop |
+| `kernel list \| check \| run` | Kernel optimisation campaigns |
 | `dir [path\|n]`, `dir recent`, `dir mk <path>` | Show, change, list recent, or create-and-switch the workspace |
-| `accounts`, `account add\|login\|probe\|rm` | Manage the pool |
+| `accounts`, `account add\|login\|probe\|enable\|disable\|rm` | Manage the pool |
 | `runs`, `stop [id\|all]`, `report [id]` | Inspect and control runs |
 | `mode yolo\|auto` | `yolo` (default) = full permissions; `auto` = workspace-write sandbox |
-| `set slots\|workers <n>` | Jobs per account / max lines of attack per run (defaults: 4 / 12) |
+| `set slots\|workers\|timeout\|rounds\|budget\|cost <n>` | Jobs per account, lines of attack, agent time limit in minutes, rounds per run (0 = until stopped), agents per run (default 80), USD per run (0 = no cap) |
 | `clear` | Clear the dashboard view |
 
-## Safety
+## Safety and operations
 
-- The server listens on `127.0.0.1` only, checks the `Host` header, and requires the per-launch token on both the event stream and command endpoint.
-- Agents run with **full permissions by default** (`yolo`): Codex with no sandbox and no approvals (the SDK equivalent of `codex --yolo`), Claude Code and Antigravity with `--dangerously-skip-permissions`. They can run any command and edit any file your user can. Type `mode auto` (or start with `RATCHET_MODE=auto`) for the sandboxed mode: Claude Code `acceptEdits` with a tool allowlist, Codex `workspace-write`, Antigravity `accept-edits` with shell commands allowed.
-- Agents can run shell commands and read the web. Point Ratchet at folders you are comfortable with agents editing.
+- The server listens on `127.0.0.1` only, checks the `Host` header and requires the per-launch token (compared in constant time) on every API and on the event stream. Pages carry a content security policy, `nosniff`, `no-referrer` and `frame-ancestors 'none'`.
+- Agents run with **full permissions by default** (`yolo`): Codex with no sandbox and no approvals (the SDK equivalent of `codex --yolo`), Claude Code and Antigravity with `--dangerously-skip-permissions`. They can run any command and edit any file your user can. Type `mode auto` (or start with `RATCHET_MODE=auto`) for the sandboxed mode.
+- Budgets: every run stops opening agents after `set budget` agents (default 80) and stops entirely when reported cost reaches `set cost` dollars. Each agent is stopped after `set timeout` minutes (default 30).
+- `GET /api/health` returns `{ok, version, uptimeSec}` without a token for service managers. `GET /api/metrics?t=<token>` returns runs, agents, token and cost totals and per-account state.
+- `~/.ratchet/ratchet.log` is a JSON-lines operations log (run starts and ends, plans, scores, failovers, strikes, agent failures), rotated at 5 MB.
 
 ## Status
 
-Early. Verified: the Claude Code headless and Antigravity paths with real calls, the Codex SDK integration up to authentication, the full research swarm and optimise loop in `--mock` mode, and the unit tests. Not yet verified: a real multi-account run with limit failover, a real kernel optimisation, `gemini`/`opencode` harnesses, and Antigravity per-account isolation. Parsing of provider limit messages and reset times is best-effort.
+Version 1.0. Verified: every unit and integration test in CI; the full research round (plan, research, verify, rank, synthesise, judge) and the optimise loop with mock agents; real Claude Code headless and Antigravity calls; a real multi-account research round; sign-in flows for Claude Code and Codex. Not yet verified end to end: a real kernel optimisation on a GPU, `gemini` and `opencode` harnesses, and isolation of a second Antigravity account. Provider limit messages and reset times are parsed on a best-effort basis.
 
 ## Development
 
@@ -205,32 +219,14 @@ Plain ES modules with no build step. Layout: `src/harness.mjs` (CLI/SDK adapters
 
 ## Roadmap
 
-In priority order. Each item is scoped so it can be built and checked on its own.
-
-**1. Reliability of real runs** (nothing else matters if real runs flake)
-- Run a real two-account swarm end to end and fix what breaks; record real Claude and Codex limit messages and tighten the limit and reset-time parsers against them.
-- Persist runs, claims and the archive so a restart can resume a run instead of losing it.
-- Per-agent timeouts and a visible retry history; surface harness stderr in the agent details.
-- Show real quota use per account where the CLIs expose it.
-
-**2. Add-agent flow**
-- Model and effort choice per agent, working-folder override, and saved templates.
-- Launch several agents at once; send a follow-up message to a running agent and resume a finished one.
-- Stop a single agent from its details panel.
-
-**3. Research quality**
-- Iterative rounds: plan, run, verify, then re-plan from what was refuted or left unclear.
-- Memory that lasts across runs for confirmed facts as well as dead ends.
-- Optimiser: per-family score curves and an archive view, meta-prompt evolution between rounds, and an Evidra campaign as a worker type.
-
-**4. Look and layout**
-- Review each screen at real data volumes (50+ agents, long logs) and fix density, label collisions on the graph, and narrow-width layouts.
-- A browser-driven visual check of every drawer and modal, run before each release.
-- Bundle the Console theme fonts so the intended typography renders everywhere.
+- **Harness evolution.** Version the lead, worker and verifier prompts, compare each change against the previous version on a held-out question set with the rubric judge, and keep only changes that win (recursive harness self-improvement, arXiv 2607.15524; admission on fresh validation data, arXiv 2610.18813).
+- **Embedding novelty.** Replace the word-shingle similarity in the novelty gate and duplicate merging with embeddings when a local embedding model is available.
+- **Quota readouts.** Show provider quota where the CLIs expose it.
+- **Fonts.** Bundle the interface fonts so the intended typography renders everywhere.
 
 ## Prior art
 
-[karpathy/autoresearch](https://github.com/karpathy/autoresearch) for the keep-or-discard experiment loop, [AlphaEvolve](https://arxiv.org/abs/2506.13131) for the program database and model ensemble, and [KernelEvolve](https://arxiv.org/abs/2512.23236) for graph search with retrieval-augmented context.
+[karpathy/autoresearch](https://github.com/karpathy/autoresearch) for the keep-or-discard experiment loop, [Anthropic's multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) for effort scaling and delegation briefs, Google's AI co-scientist for tournament ranking and meta-review, [ShinkaEvolve](https://arxiv.org/abs/2509.19349) for novelty rejection and offspring-weighted sampling, arXiv 2609.04170 for quarantine and graduated sanctions, [AlphaEvolve](https://arxiv.org/abs/2506.13131) for the program database and model ensemble, and [KernelEvolve](https://arxiv.org/abs/2512.23236) for graph search with retrieval-augmented context.
 
 ## Kernel optimization campaigns
 

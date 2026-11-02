@@ -8,7 +8,7 @@ import { HARNESSES, mergeEnv } from './harness.mjs';
 import { TEMPLATE } from './optimizer.mjs';
 import { writeFileSync } from 'node:fs';
 
-export const COMMANDS = ['help', 'run', 'follow', 'resume', 'opt', 'kernel', 'forge', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
+export const COMMANDS = ['help', 'scores', 'run', 'follow', 'resume', 'opt', 'kernel', 'forge', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
 
 const HELP = [
   ['run <task>', 'launch a research swarm'],
@@ -25,6 +25,7 @@ const HELP = [
   ['account enable|disable <id>', 'include or exclude an account from new work'],
   ['account rm <id>', 'remove an account'],
   ['runs', 'list runs (earlier sessions included)'],
+  ['scores', 'quality score of each research round (rubric judge), to compare rounds and settings'],
   ['resume <runId>', 're-run an interrupted or failed research run; finished agents are restored, not re-run'],
   ['stop [runId|all]', 'abort a run'],
   ['report [runId]', 'print a run report'],
@@ -171,6 +172,15 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
       if (!arg) return say('usage: resume <runId>  (see: runs)', 'err');
       try { const { run, restored } = swarm.resume(arg); say(`resumed ${run.id}: ${restored} finished agents restored, the rest re-run`, 'ok'); }
       catch (e) { say(e.message, 'err'); }
+      return;
+    }
+
+    case 'scores': {
+      let rows = [];
+      try { rows = readFileSync(join(settings.dir, '.ratchet', 'scores.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { /* none yet */ }
+      if (!rows.length) return say('no scored rounds yet in this workspace', 'dim');
+      say('  when              run        round  overall  accuracy  citations  agents  task', 'dim');
+      for (const r of rows.slice(-20)) say(`  ${new Date(r.t).toLocaleString().padEnd(17)} ${String(r.run).padEnd(10)} ${String(r.round).padStart(5)}  ${Number(r.overall).toFixed(2).padStart(7)}  ${Number(r.accuracy ?? 0).toFixed(2).padStart(8)}  ${Number(r.citations ?? 0).toFixed(2).padStart(9)}  ${String(r.agents).padStart(6)}  ${String(r.task).slice(0, 40)}`);
       return;
     }
 

@@ -1,6 +1,6 @@
 {
   "name": "ratchet",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Swarm research harness: many agents, many accounts, one web terminal. Sister tool to Evidra.",
   "type": "module",
   "bin": {
