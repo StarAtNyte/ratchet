@@ -184,6 +184,12 @@ export class Swarm {
     acct.usage ??= { tokens: 0, cost: 0 };
     acct.usage.tokens += tokens; acct.usage.cost += cost;
     this.emit({ kind: 'agent.usage', runId: run.id, agentId: rec.id, account: acct.id, tokens, cost, runTokens: run.usage.tokens, runCost: run.usage.cost });
+    const cap = this.settings.runCostBudget ?? 0;
+    if (cap > 0 && run.usage.cost >= cap && run.status === 'running') {
+      if (run.chain) run.chain.stopped = true;
+      this.emit({ kind: 'agent.log', runId: run.id, agentId: rec.id, logKind: 'err', text: `run cost budget $${cap} reached; stopping the run` });
+      run.abort.abort();
+    }
   }
 
   finish(run, rec, res) {

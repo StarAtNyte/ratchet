@@ -75,7 +75,7 @@ function argChoices(cmd, sub) {
   if (cmd === 'resume') return [...S.runs.values()].filter((r) => r.status !== 'running' && r.status !== 'done').map((r) => r.id).reverse();
   if (cmd === 'account') return sub === undefined ? ['add', 'login', 'probe', 'enable', 'disable', 'rm'] : sub === 'add' ? (S.harnesses ?? []) : accts;
   if (cmd === 'mode') return ['yolo', 'auto'];
-  if (cmd === 'set') return sub === undefined ? ['slots', 'workers', 'timeout', 'rounds'] : [];
+  if (cmd === 'set') return sub === undefined ? ['slots', 'workers', 'timeout', 'rounds', 'budget', 'cost'] : [];
   if (cmd === 'kernel' || cmd === 'forge') return sub === undefined ? ['list', 'setup', 'status', 'check', 'run'] : [];
   if (cmd === 'opt') return sub === undefined ? ['init', 'start', 'apply'] : [];
   if (cmd === 'dir') return sub === undefined ? ['recent', 'mk', ...(S.settings.recent ?? [])] : [];

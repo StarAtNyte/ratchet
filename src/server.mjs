@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, rmSync, appendFileSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { dirname, join, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +27,19 @@ const VENDOR = {
 };
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 const MAX_EVENTS = 4000;
+const VERSION = JSON.parse(readFileSync(join(SRC, '..', 'package.json'), 'utf8')).version;
+const STARTED = Date.now();
+const LOG = join(HOME, 'ratchet.log');
+// structured operations log: one JSON object per line, rotated at 5 MB
+const LOGGED = new Set(['run.start', 'run.end', 'run.plan', 'run.score', 'agent.failover', 'agent.strike', 'account.limited']);
+function oplog(ev) {
+  if (!LOGGED.has(ev.kind) && !(ev.kind === 'agent.end' && !ev.ok)) return;
+  try {
+    if (existsSync(LOG) && statSync(LOG).size > 5e6) renameSync(LOG, `${LOG}.1`);
+    const { kind, runId, agentId, status, note, error, reason, complexity, score, from } = ev;
+    appendFileSync(LOG, `${JSON.stringify({ t: new Date().toISOString(), kind, runId, agentId, status, note, error, reason, complexity, score: score?.overall, from })}\n`);
+  } catch { /* logging never breaks the app */ }
+}
 const STATE = join(HOME, 'state.json');
 const loadRecent = () => { try { return JSON.parse(readFileSync(STATE, 'utf8')).recent ?? []; } catch { return []; } };
 const expand = (p) => resolve(String(p).replace(/^~(?=$|\/)/, homedir()));
@@ -42,13 +55,14 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
 
   const emit = (ev) => {
     const e = { ...ev, seq: ++seq, t: ev.t ?? Date.now() };
+    if (!ev.restored) oplog(e);
     history.push(e);
     if (history.length > MAX_EVENTS) history.splice(0, history.length - MAX_EVENTS);
     const data = `data: ${JSON.stringify(e)}\n\n`;
     for (const c of clients) c.write(data);
   };
 
-  const settings = { dir, mode: process.env.RATCHET_MODE === 'auto' ? 'auto' : 'yolo', mock, slots: 4, workers: 12, agentTimeoutMin: 30, rounds: 0, recent: loadRecent().filter((d) => existsSync(d)) };
+  const settings = { dir, mode: process.env.RATCHET_MODE === 'auto' ? 'auto' : 'yolo', mock, slots: 4, workers: 12, agentTimeoutMin: 30, rounds: 0, runAgentBudget: 80, runCostBudget: 0, recent: loadRecent().filter((d) => existsSync(d)) };
   const remember = (d) => {
     settings.recent = [d, ...settings.recent.filter((x) => x !== d)].slice(0, 8);
     try { writeFileSync(STATE, JSON.stringify({ recent: settings.recent })); } catch { /* best effort */ }
@@ -117,11 +131,37 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
     if (host !== '127.0.0.1' && host !== 'localhost') { res.writeHead(403).end('bad host'); return false; }
     return true;
   };
-  const authed = (req, url) => (req.headers['x-ratchet-token'] ?? url.searchParams.get('t')) === token;
+  const tokenBuf = Buffer.from(token);
+  const authed = (req, url) => {
+    const given = Buffer.from(String(req.headers['x-ratchet-token'] ?? url.searchParams.get('t') ?? ''));
+    return given.length === tokenBuf.length && timingSafeEqual(given, tokenBuf);
+  };
 
   const server = createServer(async (req, res) => {
     if (!guard(req, res)) return;
     const url = new URL(req.url, 'http://x');
+    res.setHeader('x-content-type-options', 'nosniff');
+    res.setHeader('referrer-policy', 'no-referrer');
+    res.setHeader('x-frame-options', 'DENY');
+
+    // liveness for scripts and the service manager; reveals nothing sensitive
+    if (url.pathname === '/api/health') {
+      return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, version: VERSION, uptimeSec: Math.round((Date.now() - STARTED) / 1000) }));
+    }
+
+    if (url.pathname === '/api/metrics') {
+      if (!authed(req, url)) return void res.writeHead(401).end();
+      const runs = [...swarm.runs.values()];
+      const agents = runs.flatMap((r) => [...r.agents.values()]);
+      const accounts = pool.list().map((a) => ({ id: a.id, harness: a.harness, status: a.status, enabled: a.enabled !== false, authed: a.authed, load: a.load, done: a.done, failed: a.failed, tokens: a.usage?.tokens ?? 0, cost: a.usage?.cost ?? 0 }));
+      return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+        version: VERSION, uptimeSec: Math.round((Date.now() - STARTED) / 1000), workspace: settings.dir, mode: settings.mode,
+        runs: { total: runs.length, running: runs.filter((r) => r.status === 'running').length },
+        agents: { total: agents.length },
+        usage: runs.reduce((u, r) => ({ tokens: u.tokens + (r.usage?.tokens ?? 0), cost: u.cost + (r.usage?.cost ?? 0) }), { tokens: 0, cost: 0 }),
+        accounts,
+      }));
+    }
 
     if (url.pathname === '/api/events') {
       if (!authed(req, url)) return void res.writeHead(401).end();
@@ -283,6 +323,7 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
     }
 
     const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+    if (file === 'index.html') res.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
     const p = join(UI, file);
     if (!p.startsWith(UI) || !existsSync(p)) return void res.writeHead(404).end('not found');
     res.writeHead(200, { 'content-type': `${MIME[extname(p)] ?? 'text/plain'}; charset=utf-8`, 'cache-control': 'no-store' });
