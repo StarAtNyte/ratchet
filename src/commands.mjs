@@ -6,9 +6,10 @@ import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
 import { HARNESSES, mergeEnv } from './harness.mjs';
 import { TEMPLATE } from './optimizer.mjs';
+import { MODES, MODE_IDS, parseMode } from './modes.mjs';
 import { writeFileSync } from 'node:fs';
 
-export const COMMANDS = ['help', 'scores', 'run', 'follow', 'resume', 'opt', 'kernel', 'forge', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
+export const COMMANDS = ['help', 'program', 'scores', 'run', 'modes', 'research', 'math', 'score', 'build', 'follow', 'resume', 'opt', 'kernel', 'forge', 'dir', 'accounts', 'account', 'runs', 'stop', 'report', 'mode', 'set', 'clear'];
 
 const HELP = [
   ['run <task>', 'launch a research swarm'],
@@ -24,6 +25,10 @@ const HELP = [
   ['account probe [id]', 'check which accounts are logged in'],
   ['account enable|disable <id>', 'include or exclude an account from new work'],
   ['account rm <id>', 'remove an account'],
+  ['run [-m mode] <task>', `start a run in a mode (${MODE_IDS.join(', ')}); research is the default`],
+  ['research | math | score | build <task>', 'shortcuts for run -m <mode>'],
+  ['modes', 'what each mode does'],
+  ['program [init]', 'show or create program.md, the research instructions every agent follows'],
   ['runs', 'list runs (earlier sessions included)'],
   ['scores', 'quality score of each research round (rubric judge), to compare rounds and settings'],
   ['resume <runId>', 're-run an interrupted or failed research run; finished agents are restored, not re-run'],
@@ -225,12 +230,37 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
       return say(`${k} = ${n}`, 'ok');
     }
 
+    case 'program': {
+      const f = join(settings.dir, 'program.md');
+      if (rest[0] === 'init') {
+        if (existsSync(f)) return say(`${f} already exists`, 'warn');
+        writeFileSync(f, `# Research program\n\nEdit this file to steer every agent Ratchet starts in this workspace.\n\n## Goal\nWhat counts as success, and the one number or result that measures it.\n\n## Constraints\n- What must not change (files, interfaces, data).\n- Time or compute limits per experiment.\n\n## Ideas to try\n- Directions you believe in, papers to read first.\n\n## Avoid\n- Approaches that are known dead ends here.\n`);
+        return say(`wrote ${f}; every agent now reads it`, 'ok');
+      }
+      if (!existsSync(f)) return say('no program.md in this workspace. Create one with: program init', 'dim');
+      readFileSync(f, 'utf8').split('\n').slice(0, 40).forEach((l) => say(l, 'dim'));
+      return;
+    }
+
+    case 'modes':
+      for (const [id, m] of Object.entries(MODES)) say(`  ${id.padEnd(9)} ${m.label}: ${m.summary}`, 'dim');
+      say('  start one with: run -m <mode> <task>   (kernel campaigns on a task folder: kernel run <task>)', 'dim');
+      return;
+
+    case 'research': case 'math': case 'score': case 'build':
     case 'run': {
-      const task = arg;
-      if (!task) return say('usage: run <task>', 'err');
+      let parsed;
+      try { parsed = parseMode(cmd === 'run' ? arg : `-m ${cmd} ${arg}`); } catch (e) { return say(e.message, 'err'); }
+      const { mode, task } = parsed;
+      if (!task) return say(`usage: ${cmd === 'run' ? 'run [-m mode]' : cmd} <task>`, 'err');
       if (!pool.list().length) return say('no accounts. try: account add claude', 'err');
-      const r = swarm.start(task);
-      say(`run ${r.id} launched in ${settings.dir}${settings.rounds ? '' : '; it keeps going round after round until you type stop'}`, 'ok');
+      // score mode hands over to the optimise loop once a fixed evaluator exists
+      if (mode === 'score' && existsSync(join(settings.dir, 'ratchet.json'))) {
+        try { const r = await optimizer.start(task); say(`ratchet.json found: optimise run ${r.id} launched (evolutionary search with explorers)`, 'ok'); } catch (e) { say(e.message, 'err'); }
+        return;
+      }
+      const r = swarm.start(task, undefined, mode);
+      say(`${MODES[mode].label} run ${r.id} launched in ${settings.dir}${settings.rounds ? '' : '; it keeps going round after round until you stop it'}`, 'ok');
       return;
     }
     default: {

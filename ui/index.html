@@ -22,6 +22,7 @@
       <span class="word">Ratchet</span>
     </div>
     <button type="button" class="ws" id="ws" title="Change workspace folder"></button>
+    <button type="button" class="newrun" id="newRun">New run</button>
     <button type="button" class="chip" id="accToggle" aria-controls="accounts">Accounts</button>
     <dl class="meters" id="meters"></dl>
     <div class="chip mock" id="mockChip" hidden>Mock agents</div>
@@ -45,7 +46,8 @@
         <div class="legend"><span><i class="c-claude"></i>Claude</span><span><i class="c-codex"></i>Codex</span><span><i class="c-antigravity"></i>Antigravity</span><span><i class="c-bad"></i>Failed</span></div>
         <div class="empty" id="graphEmpty">
           <div class="big">Start a research run</div>
-          <div class="empty-sub">Describe a question in the Terminal tab below, for example <code>run why does warmup help Adam</code>.</div>
+          <div class="empty-sub">Pick a mode (research, math, kernel optimization, score improvement or build) and describe the task. From the Terminal: <code>run -m math prove that …</code></div>
+          <button type="button" class="newrun big-cta" id="newRunEmpty">New run</button>
         </div>
       </div>
     </section>
@@ -121,6 +123,17 @@
     <p class="muted2">Campaigns use an available Claude account from your pool. Starting a campaign can use GPU and model credits.</p>
     <pre id="forgeResult" class="dpre" role="status" hidden></pre>
     <div class="actions"><span class="grow"></span><button type="button" id="forgeCheck">Check task</button><button type="button" class="primary" id="forgeStart">Start campaigns</button></div>
+  </div>
+</div>
+<div id="runModal" class="modal" hidden>
+  <div class="box run-box" role="dialog" aria-modal="true" aria-labelledby="runTitle">
+    <h3 id="runTitle">New run</h3>
+    <div class="mode-cards" id="modeCards" role="radiogroup" aria-label="Mode"></div>
+    <label class="forge-label" for="runTask">What should the swarm work on?</label>
+    <textarea id="runTask" rows="4" spellcheck="true" placeholder="Describe the question, goal or target"></textarea>
+    <div class="fieldrow"><label for="runRounds">Rounds</label><select id="runRounds"><option value="0">Keep going until I stop it</option><option value="1">1 round</option><option value="2">2 rounds</option><option value="3">3 rounds</option><option value="5">5 rounds</option></select></div>
+    <p class="muted2" id="runHint"></p>
+    <div class="actions"><span id="runErr" class="err"></span><span class="grow"></span><button id="runCancel" type="button">Cancel</button><button id="runGo" type="button" class="primary">Start run</button></div>
   </div>
 </div>
 <div id="agentModal" class="modal" hidden>

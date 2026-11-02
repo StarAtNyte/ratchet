@@ -110,3 +110,29 @@ test('scheduler spreads work to an idle provider when the preferred account is b
   accounts.forEach((a) => { a.load = 1; });
   assert.equal((await swarm.acquire('codex', ctl.signal, () => {}, null, new Set(), true)).harness, 'codex', 'verification stays strict');
 });
+
+test('real optimise path: staging outside the workspace, evaluator run and git champion commits', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { writeFileSync: wf, mkdirSync: md } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'ratchet-opt-ws-'));
+  wf(join(dir, 'kernel.py'), 'X = 1\n');
+  wf(join(dir, 'bench.py'), 'import json\nfrom kernel import X\nprint(json.dumps({"score": X, "ok": True}))\n');
+  const g = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
+  g('init', '-q'); g('add', '.'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+  const { Optimizer } = await import('../src/optimizer.mjs');
+  const events = [];
+  const run = { id: 'rtest', root: join(dir, '.ratchet', 'runs', 'x'), agents: new Map(), abort: new AbortController(), status: 'running' };
+  md(run.root, { recursive: true });
+  const swarm = { settings: { dir, mock: false }, newRun: () => run, emit: (e) => events.push(e), end: (r, st) => { r.status = st; } };
+  const opt = new Optimizer(swarm);
+  // drive only the baseline and one manual champion through the real file paths
+  wf(join(dir, 'ratchet.json'), JSON.stringify({ objective: 'lower X', targets: ['kernel.py'], eval: ['python3 bench.py'], direction: 'min', parallel: 0, maxIterations: 1 }));
+  await opt.start();
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(run.status, 'done', 'baseline evaluated from a staging copy outside the workspace');
+  const o = opt.last;
+  assert.ok(!o.scratch.startsWith(dir), 'scratch is outside the workspace');
+  assert.ok(readFileSync(join(o.optDir, 'results.tsv'), 'utf8').startsWith('gen\tid'), 'results log written');
+  assert.equal(o.archive.champion.id, 'base');
+  assert.match(String(execFileSync('git', ['branch', '--list', 'ratchet/*'], { cwd: dir })), /ratchet\/rtest/, 'git ratchet branch created');
+});

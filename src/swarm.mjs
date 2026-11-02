@@ -2,6 +2,7 @@ import { join, isAbsolute, resolve } from 'node:path';
 import { mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, readdirSync } from 'node:fs';
 import { runCli } from './harness.mjs';
 import { runMock } from './mock.mjs';
+import { modeRules } from './modes.mjs';
 import { linesFor, difficultyOf, DIFFICULTY, brief, gateVerdict, missingLocalSource, applyStrikes, elo, pairings, cluster } from './methods.mjs';
 
 const sleep = (ms, signal) => new Promise((resolve) => {
@@ -203,15 +204,15 @@ export class Swarm {
     return res;
   }
 
-  newRun(task, kind = 'research', reuse = null) {
+  newRun(task, kind = 'research', reuse = null, mode = 'research') {
     let id = reuse?.id;
     if (!id) { do id = `r${Date.now().toString(36).slice(-4)}${++this.seq}`; while (this.runs.has(id)); }
     const root = reuse?.root ?? join(this.settings.dir, '.ratchet', 'runs', `${Date.now().toString(36)}-${id}`);
     mkdirSync(join(root, 'findings'), { recursive: true });
-    const run = { id, task, kind, root, agents: new Map(), claims: [], abort: new AbortController(), status: 'running', report: null, cache: reuse?.cache ?? new Map(), results: reuse?.results ?? {} };
+    const run = { id, task, kind, mode: reuse?.mode ?? mode, root, agents: new Map(), claims: [], abort: new AbortController(), status: 'running', report: null, cache: reuse?.cache ?? new Map(), results: reuse?.results ?? {} };
     this.runs.set(id, run);
-    if (!reuse) writeFileSync(join(root, 'meta.json'), JSON.stringify({ id, task, kind, started: Date.now() }));
-    this.emit({ kind: 'run.start', runId: id, task, dir: this.settings.dir, root });
+    if (!reuse) writeFileSync(join(root, 'meta.json'), JSON.stringify({ id, task, kind, mode, started: Date.now() }));
+    this.emit({ kind: 'run.start', runId: id, task, dir: this.settings.dir, root, mode: run.mode });
     return run;
   }
 
@@ -233,7 +234,7 @@ export class Swarm {
       const report = events.find((e) => e.kind === 'run.report')?.markdown ?? null;
       const claims = [];
       for (const e of events) if (e.kind === 'claims') for (const c of e.claims) { const i = claims.findIndex((x) => x.id === c.id); if (i >= 0) claims[i] = c; else claims.push(c); }
-      const run = { id, task: start.task, kind: meta.kind ?? 'research', root, agents: new Map(), claims, abort: new AbortController(), status: ended ? ended.status : 'interrupted', report, cache: new Map(), results: {}, restored: true };
+      const run = { id, task: start.task, kind: meta.kind ?? 'research', mode: meta.mode ?? 'research', root, agents: new Map(), claims, abort: new AbortController(), status: ended ? ended.status : 'interrupted', report, cache: new Map(), results: {}, restored: true };
       for (const e of events) if (e.kind === 'agent.start') run.agents.set(e.id, { id: e.id, role: e.role, title: e.title, parent: e.parent });
       this.runs.set(id, run);
       for (const e of events) this.emitRaw({ ...e, runId: id, restored: true });
@@ -252,15 +253,16 @@ export class Swarm {
     try { results = JSON.parse(readFileSync(join(old.root, 'results.json'), 'utf8')); } catch { /* none saved */ }
     const cache = new Map(Object.entries(results));
     this.runs.delete(id);
-    const run = this.newRun(old.task, 'research', { id, root: old.root, cache, results });
+    const run = this.newRun(old.task, 'research', { id, root: old.root, cache, results, mode: old.mode ?? 'research' });
     try { run.followups = readFileSync(join(old.root, 'instructions.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line).text); } catch { run.followups = []; }
     this.drive(run).catch((e) => this.end(run, 'failed', e.message));
     return { run, restored: cache.size };
   }
 
   /** Start a research run. Rounds chain until the user stops them or the round limit is reached. */
-  start(task, chain = { round: 1, stopped: false, prev: null }) {
-    const run = this.newRun(chain.round > 1 ? `${task} (round ${chain.round})` : task);
+  start(task, chain = { round: 1, stopped: false, prev: null }, mode = chain.mode ?? 'research') {
+    chain.mode = mode;
+    const run = this.newRun(chain.round > 1 ? `${task} (round ${chain.round})` : task, 'research', null, mode);
     run.followups = [...(chain.followups ?? [])];
     if (run.followups.length) writeFileSync(join(run.root, 'instructions.jsonl'), run.followups.map((text) => JSON.stringify({ t: Date.now(), text })).join('\n') + '\n');
     run.chain = chain; run.baseTask = task;
@@ -268,7 +270,7 @@ export class Swarm {
     this.drive(run).catch((e) => this.end(run, 'failed', e.message)).finally(() => {
       const limit = this.settings.rounds ?? 0; // 0 = until stopped
       if (chain.stopped || run.status !== 'done' || (limit && chain.round >= limit)) return;
-      setTimeout(() => { if (!chain.stopped) this.start(task, { round: chain.round + 1, stopped: false, prev: { id: run.id, report: run.report, meta: run.meta, next: run.next }, followups: [...(run.followups ?? [])] }); chain.stopped = true; }, 5000);
+      setTimeout(() => { if (!chain.stopped) this.start(task, { round: chain.round + 1, stopped: false, prev: { id: run.id, report: run.report, meta: run.meta, next: run.next }, followups: [...(run.followups ?? [])], mode }); chain.stopped = true; }, 5000);
     });
     return run;
   }
@@ -333,8 +335,17 @@ export class Swarm {
     appendFileSync(join(this.settings.dir, '.ratchet', 'memory.jsonl'), dead.map((c) => JSON.stringify({ ts: Date.now(), text: c.text, note: c.note })).join('\n') + '\n');
   }
 
+  /** The user's research program (program.md, as in autoresearch): steers every agent in every mode. */
+  program() {
+    for (const f of [join(this.settings.dir, 'program.md'), join(this.settings.dir, '.ratchet', 'program.md')]) {
+      try { const t = readFileSync(f, 'utf8').trim(); if (t) return t.slice(0, 8000); } catch { /* next */ }
+    }
+    return '';
+  }
+
   ctx(run) {
-    return `Workspace folder: ${this.settings.dir}\nRun notes folder: ${run.root}\nOverall research task: ${run.task}${run.followups?.length ? `\nAdditional user instructions for subsequent work:\n${run.followups.map((text, i) => `${i + 1}. ${text}`).join('\n')}` : ''}`;
+    const program = this.program();
+    return `${program ? `Research program from the user (program.md), follow it:\n${program}\n\n` : ''}Workspace folder: ${this.settings.dir}\nRun notes folder: ${run.root}\nOverall research task: ${run.task}${run.followups?.length ? `\nAdditional user instructions for subsequent work:\n${run.followups.map((text, i) => `${i + 1}. ${text}`).join('\n')}` : ''}`;
   }
 
   async drive(run) {
@@ -345,7 +356,7 @@ export class Swarm {
     // 1. plan, with explicit effort scaling (Anthropic): the lead classifies the question first
     const plan = await this.agent(run, {
       id: 'lead', role: 'lead', title: 'Plan', pref: 'claude',
-      prompt: `[[ROLE:plan]]\nYou are the lead of a research swarm.\n${this.ctx(run)}\n\n${this.memory()}${prev?.report ? `This is round ${run.chain.round}. The previous round (${prev.id}) concluded:\n${String(prev.report).slice(0, 6000)}\n\n${prev.meta?.length ? `Its meta-review found these recurring weaknesses; fix them in this round's briefs:\n${prev.meta.map((m) => `- ${m}`).join('\n')}\n\n` : ''}${prev.next?.length ? `Suggested next lines:\n${prev.next.map((m) => `- ${m}`).join('\n')}\n\n` : ''}Do not redo settled work. Go deeper: chase its open questions, unclear claims and best next experiments.\n\n` : ''}Inspect the workspace briefly. First classify the question:\n- "simple": one fact or one check (1-2 lines of attack)\n- "comparison": compare a few options (2-4 lines)\n- "complex": open research (up to ${maxWorkers} lines with clearly divided responsibilities)\nThen split it into independent lines of attack that different researchers can pursue in parallel. Cover distinct approaches, not rewordings, and give each line explicit boundaries so researchers do not duplicate each other. For comparison and complex questions the portfolio must include: (1) a literature line that reads recent papers and preprints (arXiv, Hugging Face papers, conference proceedings, strong engineering posts) and extracts concrete mechanisms with citations; (2) at least one invention line that proposes a genuinely new algorithm, method or architecture (combining or going beyond what the literature does), then builds a prototype and measures it against the best known baseline; (3) a falsification line that tries to break the leading hypotheses with counterexamples, adversarial inputs or ablations. Mark each line's kind. When the user requests performance optimization, assign concrete implementation, correctness checks, benchmarking and iteration; when the user explicitly requests submission, include the documented submission and result-review workflow. Coordinate shared files and remote benchmarks to avoid conflicting concurrent work. Each line gets a harness: "claude" for long reading/synthesis/writing, "codex" for code-heavy experiments, "any" otherwise, and a difficulty: "low" (direct answer), "medium", or "high" (may split into sub-investigations).\nReply with ONLY a JSON block:\n\`\`\`json\n{"complexity":"simple|comparison|complex","subtasks":[{"title":"short","objective":"what this line must establish","prompt":"self-contained instructions","non_goals":["what this line must not do"],"output":"what to deliver","stop_when":"stop condition","harness":"claude|codex|any","difficulty":"low|medium|high","kind":"literature|invention|experiment|falsification|analysis"}]}\n\`\`\``,
+      prompt: `[[ROLE:plan]]\nYou are the lead of a research swarm.\n${this.ctx(run)}\n\n${this.memory()}${prev?.report ? `This is round ${run.chain.round}. The previous round (${prev.id}) concluded:\n${String(prev.report).slice(0, 6000)}\n\n${prev.meta?.length ? `Its meta-review found these recurring weaknesses; fix them in this round's briefs:\n${prev.meta.map((m) => `- ${m}`).join('\n')}\n\n` : ''}${prev.next?.length ? `Suggested next lines:\n${prev.next.map((m) => `- ${m}`).join('\n')}\n\n` : ''}Do not redo settled work. Go deeper: chase its open questions, unclear claims and best next experiments.\n\n` : ''}${modeRules(run.mode, 'plan')}Inspect the workspace briefly. First classify the question:\n- "simple": one fact or one check (1-2 lines of attack)\n- "comparison": compare a few options (2-4 lines)\n- "complex": open research (up to ${maxWorkers} lines with clearly divided responsibilities)\nThen split it into independent lines of attack that different researchers can pursue in parallel. Cover distinct approaches, not rewordings, and give each line explicit boundaries so researchers do not duplicate each other. For comparison and complex questions the portfolio must include: (1) a literature line that reads recent papers and preprints (arXiv, Hugging Face papers, conference proceedings, strong engineering posts) and extracts concrete mechanisms with citations; (2) at least one invention line that proposes a genuinely new algorithm, method or architecture (combining or going beyond what the literature does), then builds a prototype and measures it against the best known baseline; (3) a falsification line that tries to break the leading hypotheses with counterexamples, adversarial inputs or ablations. Mark each line's kind. When the user requests performance optimization, assign concrete implementation, correctness checks, benchmarking and iteration; when the user explicitly requests submission, include the documented submission and result-review workflow. Coordinate shared files and remote benchmarks to avoid conflicting concurrent work. Each line gets a harness: "claude" for long reading/synthesis/writing, "codex" for code-heavy experiments, "any" otherwise, and a difficulty: "low" (direct answer), "medium", or "high" (may split into sub-investigations).\nReply with ONLY a JSON block:\n\`\`\`json\n{"complexity":"simple|comparison|complex","subtasks":[{"title":"short","objective":"what this line must establish","prompt":"self-contained instructions","non_goals":["what this line must not do"],"output":"what to deliver","stop_when":"stop condition","harness":"claude|codex|any","difficulty":"low|medium|high","kind":"literature|invention|experiment|falsification|analysis"}]}\n\`\`\``,
     });
     if (signal.aborted) return this.end(run, 'stopped');
     const parsed = plan.ok ? extractJson(plan.text) : null;
@@ -395,7 +406,7 @@ export class Swarm {
       : `Do not spawn further agents.${depth >= 2 ? ' [[DEPTH:2]]' : ''}`;
     const res = await this.agent(run, {
       id, role: depth > 1 ? 'sub' : 'worker', title: st.title, parent: parent ?? 'lead', pref: st.harness,
-      prompt: `[[ROLE:worker]]\nYou are a researcher in a swarm. Think before acting: write down your hypotheses, the mechanism by which each could work, and what result would prove you wrong, in your notes before running experiments. Read the relevant papers and prior work (search arXiv, Hugging Face papers, proceedings, code repositories) instead of relying on memory, and cite what you use. Aim for new ideas: when existing methods fall short, design a new algorithm, method or architecture, build a prototype and test it against the strongest baseline. Be rigorous; check every claim against primary evidence (papers, code you actually ran, data). Prefer experiments and proofs over opinion.\n${this.ctx(run)}\n\nYour assignment (${st.kind ?? 'analysis'} line): ${st.title}\n${brief(st, st.siblings ?? [])}${st.kind === 'invention' ? '\nThis is an invention line: the deliverable is a new method with a working prototype, a measured comparison against the best known baseline, and an honest account of where it fails.' : st.kind === 'literature' ? '\nThis is a literature line: read primary sources, extract mechanisms and results with exact citations, and point out gaps nobody has tried.' : st.kind === 'falsification' ? '\nThis is a falsification line: try hard to break the leading ideas with counterexamples, adversarial inputs and ablations; a refutation is a success.' : ''}\n\nWork only from primary evidence and your own notes. Do not read other researchers' notes or work folders under ${join(run.root, 'findings')}; verified results are shared with you when relevant. Every claim must point to evidence another model can check: a URL, a file path with line, or a command and its output. Tag each claim: "finding" (established by evidence), "hypothesis" (plausible, not yet shown), or "invention" (a new method you built and measured; its source must be the prototype and the command that measures it).\n\nWrite working notes and artifacts under ${join(run.root, 'findings', id + '-work')}/ and a summary to ${notes}. Do not modify existing project files unless the task requires it.\n${spawnRule}\nIf this assignment requests optimization, make concrete improvements, run correctness and performance checks, compare results to the baseline, and iterate using the measured outcome. If the user explicitly requested submissions, use the workspace's documented submission process, record the result and iterate; never claim a submission or benchmark succeeded without evidence. Coordinate shared files and benchmark resources with other workers.\n\nFinish with a short prose summary, then ONE JSON block:\n\`\`\`json\n{"claims":[{"text":"one checkable claim","source":"where the evidence is (url, file, command)","type":"finding|hypothesis|invention"}],"spawn":[]}\n\`\`\``,
+      prompt: `[[ROLE:worker]]\nYou are a researcher in a swarm. Think before acting: write down your hypotheses, the mechanism by which each could work, and what result would prove you wrong, in your notes before running experiments. Read the relevant papers and prior work (search arXiv, Hugging Face papers, proceedings, code repositories) instead of relying on memory, and cite what you use. Aim for new ideas: when existing methods fall short, design a new algorithm, method or architecture, build a prototype and test it against the strongest baseline. Be rigorous; check every claim against primary evidence (papers, code you actually ran, data). Prefer experiments and proofs over opinion.\n${this.ctx(run)}\n\nYour assignment (${st.kind ?? 'analysis'} line): ${st.title}\n${brief(st, st.siblings ?? [])}${st.kind === 'invention' ? '\nThis is an invention line: the deliverable is a new method with a working prototype, a measured comparison against the best known baseline, and an honest account of where it fails.' : st.kind === 'literature' ? '\nThis is a literature line: read primary sources, extract mechanisms and results with exact citations, and point out gaps nobody has tried.' : st.kind === 'falsification' ? '\nThis is a falsification line: try hard to break the leading ideas with counterexamples, adversarial inputs and ablations; a refutation is a success.' : ''}\n\nWork only from primary evidence and your own notes. Do not read other researchers' notes or work folders under ${join(run.root, 'findings')}; verified results are shared with you when relevant. ${modeRules(run.mode, 'worker')}Every claim must point to evidence another model can check: a URL, a file path with line, or a command and its output. Tag each claim: "finding" (established by evidence), "hypothesis" (plausible, not yet shown), or "invention" (a new method you built and measured; its source must be the prototype and the command that measures it).\n\nWrite working notes and artifacts under ${join(run.root, 'findings', id + '-work')}/ and a summary to ${notes}. Do not modify existing project files unless the task requires it.\n${spawnRule}\nIf this assignment requests optimization, make concrete improvements, run correctness and performance checks, compare results to the baseline, and iterate using the measured outcome. If the user explicitly requested submissions, use the workspace's documented submission process, record the result and iterate; never claim a submission or benchmark succeeded without evidence. Coordinate shared files and benchmark resources with other workers.\n\nFinish with a short prose summary, then ONE JSON block:\n\`\`\`json\n{"claims":[{"text":"one checkable claim","source":"where the evidence is (url, file, command)","type":"finding|hypothesis|invention"}],"spawn":[]}\n\`\`\``,
     });
     const out = res.ok ? extractJson(res.text) : null;
     const rec = run.agents.get(id);
@@ -423,7 +434,7 @@ export class Swarm {
     const list = claims.map((c) => `- (id: ${c.id}) ${c.text}\n  evidence claimed: ${c.source}${c.flag ? `\n  note: ${c.flag}` : ''}`).join('\n');
     const res = await this.agent(run, {
       id, role: 'verify', title: `Check ${authorAgent}`, parent: authorAgent, pref: this.other(author?.harness),
-      prompt: `[[ROLE:verify]]\nYou are an independent verifier from a different model family than the author. Do not trust the author. Re-derive or re-run what you can; look for counterexamples.\n${this.ctx(run)}\nAuthor notes: ${join(run.root, 'findings', authorAgent + '.md')}\n\nClaims to check:\n${list}\n\nFor each claim give verdict "confirmed" (you reproduced it; for an invention, you re-ran the prototype and measurement yourself), "refuted" (you found it false), or "unclear" (cannot tell), a one-line note, and "evidence": a short verbatim quote from the source you checked, or the command you ran and the decisive line of its output. A confirmation without evidence counts as unclear. Set "fabricated": true only when the cited evidence does not exist or says something different.\nReply with ONLY:\n\`\`\`json\n{"verdicts":[{"id":"...","verdict":"confirmed|refuted|unclear","note":"...","evidence":"...","fabricated":false}]}\n\`\`\``,
+      prompt: `[[ROLE:verify]]\nYou are an independent verifier from a different model family than the author. Do not trust the author. Re-derive or re-run what you can; look for counterexamples.\n${this.ctx(run)}\nAuthor notes: ${join(run.root, 'findings', authorAgent + '.md')}\n\nClaims to check:\n${list}\n\n${modeRules(run.mode, 'verify')}For each claim give verdict "confirmed" (you reproduced it; for an invention, you re-ran the prototype and measurement yourself), "refuted" (you found it false), or "unclear" (cannot tell), a one-line note, and "evidence": a short verbatim quote from the source you checked, or the command you ran and the decisive line of its output. A confirmation without evidence counts as unclear. Set "fabricated": true only when the cited evidence does not exist or says something different.\nReply with ONLY:\n\`\`\`json\n{"verdicts":[{"id":"...","verdict":"confirmed|refuted|unclear","note":"...","evidence":"...","fabricated":false}]}\n\`\`\``,
     });
     const out = res.ok ? extractJson(res.text) : null;
     const rec = run.agents.get(id);
@@ -487,7 +498,7 @@ export class Swarm {
     const quarantined = run.claims.filter((c) => c.verdict === 'quarantined').length;
     const res = await this.agent(run, {
       id: 'synth', role: 'lead', title: 'Synthesis', parent: 'lead', pref: 'claude',
-      prompt: `[[ROLE:synth]]\nWrite the final research report in Markdown.\n${this.ctx(run)}\n\nClaim ledger, highest-ranked first (verdicts come from an independent model; rank comes from a pairwise tournament):\n${ledger || '(no claims were produced)'}\n${quarantined ? `\n${quarantined} claims were quarantined for integrity problems and must not be used.\n` : ''}\nResearcher notes are in ${join(run.root, 'findings')}. Rules: lead with the highest-ranked confirmed findings and any confirmed inventions (new methods with measured results), explaining the mechanism of each; state confirmed claims plainly; flag unclear ones as unverified; do NOT present refuted claims as results, list them separately as dead ends with the reason; merge duplicates. Cite claim ids. End with open questions and the best next experiments.\n\nAfter the report, add ONE JSON block for the next round:\n\`\`\`json\n{"meta_review":["recurring weakness in this round's research, phrased as an instruction for the next round"],"next_lines":["most valuable next line of attack"]}\n\`\`\``,
+      prompt: `[[ROLE:synth]]\nWrite the final research report in Markdown.\n${this.ctx(run)}\n\nClaim ledger, highest-ranked first (verdicts come from an independent model; rank comes from a pairwise tournament):\n${ledger || '(no claims were produced)'}\n${quarantined ? `\n${quarantined} claims were quarantined for integrity problems and must not be used.\n` : ''}\nResearcher notes are in ${join(run.root, 'findings')}. ${modeRules(run.mode, 'synth')}Rules: lead with the highest-ranked confirmed findings and any confirmed inventions (new methods with measured results), explaining the mechanism of each; state confirmed claims plainly; flag unclear ones as unverified; do NOT present refuted claims as results, list them separately as dead ends with the reason; merge duplicates. Cite claim ids. End with open questions and the best next experiments.\n\nAfter the report, add ONE JSON block for the next round:\n\`\`\`json\n{"meta_review":["recurring weakness in this round's research, phrased as an instruction for the next round"],"next_lines":["most valuable next line of attack"]}\n\`\`\``,
     });
     if (!res.ok) return { report: `# Report (fallback: synthesis failed)\n\n${res.error ?? ''}\n\n## Ledger\n${ledger}\n`, meta: [], next: [] };
     const j = extractJson(res.text);

@@ -11,6 +11,7 @@ import { Swarm } from './swarm.mjs';
 import { Optimizer } from './optimizer.mjs';
 import { ForgeSwarm } from './forge.mjs';
 import { HARNESSES, mergeEnv } from './harness.mjs';
+import { MODES } from './modes.mjs';
 const CLEAN = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]/g;
 const LOGIN_CMD = { claude: ['claude', ['auth', 'login']], codex: ['codex', ['login', '--device-auth']], antigravity: ['agy', ['--print=Reply with OK']] };
 import { execCommand, COMMANDS } from './commands.mjs';
@@ -166,7 +167,7 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
     if (url.pathname === '/api/events') {
       if (!authed(req, url)) return void res.writeHead(401).end();
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-      res.write(`data: ${JSON.stringify({ kind: 'hello', settings, commands: COMMANDS, harnesses: HARNESSES, seq: 0, t: Date.now() })}\n\n`);
+      res.write(`data: ${JSON.stringify({ kind: 'hello', settings, commands: COMMANDS, harnesses: HARNESSES, modes: Object.entries(MODES).map(([id, m]) => ({ id, label: m.label, summary: m.summary })), seq: 0, t: Date.now() })}\n\n`);
       for (const e of history) res.write(`data: ${JSON.stringify(e)}\n\n`);
       clients.add(res);
       pool.publishAll();

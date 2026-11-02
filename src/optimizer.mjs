@@ -1,4 +1,6 @@
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { cpSync, mkdirSync, existsSync, readFileSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
 import { Archive } from './archive.mjs';
@@ -57,7 +59,11 @@ export class Optimizer {
     const run = this.swarm.newRun(`optimize: ${cfg.objective}`, 'optimize');
     const optDir = join(run.root, 'opt');
     mkdirSync(join(optDir, 'snap'), { recursive: true });
-    const o = { run, cfg, optDir, archive: new Archive({ direction: cfg.direction, islands: Math.max(2, Math.min(cfg.parallel, 4)) }), inflight: new Set(), failures: [], n: 0, t0: Date.now(), evalLock: Promise.resolve() };
+    // staging and work copies live outside the workspace: copying a folder into its own subfolder is impossible
+    const scratch = join(tmpdir(), 'ratchet-opt', run.id);
+    mkdirSync(scratch, { recursive: true });
+    writeFileSync(join(optDir, 'results.tsv'), 'gen\tid\tparent\tfamily\tscore\tstatus\tidea\n');
+    const o = { run, cfg, optDir, scratch, git: settings.mock ? null : gitRatchet(settings.dir, scratch, run.id), archive: new Archive({ direction: cfg.direction, islands: Math.max(2, Math.min(cfg.parallel, 4)) }), inflight: new Set(), failures: [], n: 0, t0: Date.now(), evalLock: Promise.resolve() };
     this.last = o;
     this.drive(o).catch((e) => this.swarm.end(run, 'failed', e.message));
     return run;
@@ -78,7 +84,7 @@ export class Optimizer {
       const score = isBase ? 100 : base * (1 + (Math.random() - 0.55) * 0.08);
       return { ok: Math.random() > 0.12, score, holdout: score * (1 + (Math.random() - 0.5) * 0.01) };
     }
-    const stage = join(o.optDir, 'stage', id);
+    const stage = join(o.scratch, 'stage', id);
     rmSync(stage, { recursive: true, force: true });
     copyTree(this.swarm.settings.dir, stage); // pristine evaluator + data
     for (const t of cfg.targets) if (existsSync(join(snapDir, t))) cpSync(join(snapDir, t), join(stage, t), { recursive: true }); // only declared targets come from the candidate
@@ -100,7 +106,10 @@ export class Optimizer {
     const { cfg, archive, failures } = o;
     const insp = inspirations.map((e) => `- ${e.id} score ${e.score} family ${e.family}: ${e.idea} (files: ${join(o.optDir, 'snap', e.id)})`).join('\n') || '(none yet)';
     const fails = failures.slice(-12).map((f) => `- ${f.idea}: ${f.reason}`).join('\n') || '(none yet)';
-    return `[[ROLE:cand]]\nYou are one mutation worker in an evolutionary optimisation loop.\nObjective: ${cfg.objective}\nDirection: ${cfg.direction === 'min' ? 'LOWER' : 'HIGHER'} score is better. Current champion: ${archive.champion?.score ?? 'baseline pending'}. Parent (${parent?.id ?? 'baseline'}) score: ${parent?.score ?? 'n/a'}.${parent?.diag ? `\nParent evaluation output (use it to decide what to change):\n${parent.diag}` : ''}\n\nWork ONLY in ${workDir}. Edit only these target files: ${cfg.targets.join(', ')}. Changes to any other file are discarded and count as cheating.\nYou may run the evaluator yourself to check: ${[].concat(cfg.eval).join(' && ')}\n\n${explorer ? `You are an EXPLORER this generation. Before editing, research: search recent papers, preprints and strong code repositories for algorithms and architectures that could beat the current approach, and think through why each would or would not work here. Then implement a fundamentally different algorithm or architecture, in a method family not yet tried (tried so far: ${archive.families().join(', ') || 'none'}). Small parameter tweaks of the existing approach do not count.` : 'Think first: state your hypothesis and the mechanism by which it should improve the score, then try ONE focused, meaningfully different idea.'} Diverse inspirations from other method families:\n${insp}\n\nFailed ideas, do not repeat:\n${fails}\n\nFinish with ONE JSON block: \`\`\`json\n{"idea":"one sentence","family":"short method-family tag","hypothesis":"why it should help","source":"paper, repo or reasoning it came from"}\n\`\`\``;
+    let log = '';
+    try { log = readFileSync(join(o.optDir, 'results.tsv'), 'utf8').trim().split('\n').slice(-26).join('\n'); } catch { /* first generation */ }
+    const program = readProgram(this.swarm.settings.dir);
+    return `[[ROLE:cand]]\nYou are one mutation worker in an evolutionary optimisation loop.\nObjective: ${cfg.objective}\nDirection: ${cfg.direction === 'min' ? 'LOWER' : 'HIGHER'} score is better. Current champion: ${archive.champion?.score ?? 'baseline pending'}. Parent (${parent?.id ?? 'baseline'}) score: ${parent?.score ?? 'n/a'}.${parent?.diag ? `\nParent evaluation output (use it to decide what to change):\n${parent.diag}` : ''}\n\nWork ONLY in ${workDir}. Edit only these target files: ${cfg.targets.join(', ')}. Changes to any other file are discarded and count as cheating.\nYou may run the evaluator yourself to check: ${[].concat(cfg.eval).join(' && ')}\n\n${explorer ? `You are an EXPLORER this generation. Before editing, research: search recent papers, preprints and strong code repositories for algorithms and architectures that could beat the current approach, and think through why each would or would not work here. Then implement a fundamentally different algorithm or architecture, in a method family not yet tried (tried so far: ${archive.families().join(', ') || 'none'}). Small parameter tweaks of the existing approach do not count.` : 'Think first: state your hypothesis and the mechanism by which it should improve the score, then try ONE focused, meaningfully different idea.'} Diverse inspirations from other method families:\n${insp}\n\nExperiment log so far (every attempt, kept or discarded; learn from it, do not repeat it):\n${log || '(empty)'}\n\nFailed ideas and why:\n${fails}${program ? `\n\nResearch program from the user (program.md), follow it:\n${program}` : ''}\n\nFinish with ONE JSON block: \`\`\`json\n{"idea":"one sentence","family":"short method-family tag","hypothesis":"why it should help","source":"paper, repo or reasoning it came from"}\n\`\`\``;
   }
 
   async lane(o) {
@@ -110,7 +119,7 @@ export class Optimizer {
       const iter = ++o.n; const id = `c${iter}`;
       const { parent, island, inspirations } = archive.sample(o.inflight);
       o.inflight.add(parent?.id ?? 'base');
-      const work = join(o.optDir, 'work', id);
+      const work = join(o.scratch, 'work', id);
       if (!sw.settings.mock) {
         copyTree(sw.settings.dir, work);
         if (parent) for (const t of cfg.targets) if (existsSync(join(o.optDir, 'snap', parent.id, t))) cpSync(join(o.optDir, 'snap', parent.id, t), join(work, t), { recursive: true });
@@ -143,6 +152,9 @@ export class Optimizer {
       if (!sw.settings.mock) rmSync(work, { recursive: true, force: true });
       const entry = { id, parent: parent?.id ?? 'base', gen: iter, island, family, idea, explorer, hypothesis: String(meta.hypothesis ?? '').slice(0, 400), source: String(meta.source ?? '').slice(0, 300), score: ev.score, ok: ev.ok, holdout: ev.holdout, accepted: ev.accepted, harness: run.agents.get(id)?.harness, diag: String(ev.error ?? ev.output ?? (Number.isFinite(ev.score) ? `score ${ev.score}` : '')).slice(-600) };
       const champ = archive.add(entry);
+      const status = ev.novelty === false ? 'not-novel' : !ev.ok ? 'crash' : champ ? 'keep' : 'discard';
+      appendFileSync(join(o.optDir, 'results.tsv'), `${iter}\t${id}\t${entry.parent}\t${family}\t${Number.isFinite(ev.score) ? ev.score : ''}\t${status}\t${idea.replace(/[\t\n]+/g, ' ')}\n`);
+      if (champ && o.git) o.git.commit(join(o.optDir, 'snap', id), cfg.targets, `ratchet ${run.id}: ${id} score ${ev.score} (${family}) ${idea}`.slice(0, 300));
       if (arm) { arm.pulls++; if (ev.ok && parent && archive.better(ev.score, parent.score)) arm.reward++; }
       if (!ev.ok) { const f = { ts: Date.now(), idea, reason: ev.error ?? 'failed evaluation' }; o.failures.push(f); appendFileSync(join(o.optDir, 'failures.jsonl'), JSON.stringify(f) + '\n'); }
       sw.emit({ kind: 'cand.result', runId: run.id, agentId: id, score: ev.score, ok: ev.ok, champion: champ, idea, family, novel: ev.novelty !== false, explorer, hypothesis: entry.hypothesis, source: entry.source });
@@ -167,6 +179,8 @@ export class Optimizer {
   }
 
   finish(o) {
+    try { o.git?.close(); } catch { /* best effort */ }
+    try { rmSync(o.scratch, { recursive: true, force: true }); } catch { /* best effort */ }
     const { run, archive, cfg } = o;
     const ch = archive.champion;
     const champDir = join(o.optDir, 'champion');
@@ -174,7 +188,7 @@ export class Optimizer {
     const base = archive.entries.find((e) => e.id === 'base');
     const gain = base && ch ? (((base.score - ch.score) / base.score) * 100 * (cfg.direction === 'min' ? 1 : -1)).toFixed(2) : '0';
     const top = archive.ranked().slice(0, 8).map((e) => `- **${e.id}** score ${Number(e.score).toFixed(4)} · ${e.family} · ${e.idea}`).join('\n');
-    const md = `# Optimisation result\n\nObjective: ${cfg.objective}\n\n- baseline: ${base?.score}\n- champion: **${ch?.id}** at ${ch?.score} (${gain}% improvement)\n- candidates tried: ${archive.entries.length - 1}, failed: ${o.failures.length}\n- method families: ${archive.families().join(', ')}\n\n## Top programs\n${top}\n\n## Apply\nRun \`opt apply\` to copy the champion's target files into the workspace.\n`;
+    const md = `# Optimisation result\n\nObjective: ${cfg.objective}\n\n- baseline: ${base?.score}\n- champion: **${ch?.id}** at ${ch?.score} (${gain}% improvement)\n- candidates tried: ${archive.entries.length - 1}, failed: ${o.failures.length}\n- method families: ${archive.families().join(', ')}\n\n## Top programs\n${top}\n\n## Apply\nRun \`opt apply\` to copy the champion's target files into the workspace.${o.git ? ` Every champion is also committed on branch \`${o.git.branch}\` of the workspace repository.` : ''}\n\nThe full experiment log is in \`opt/results.tsv\`.\n`;
     run.report = md;
     writeFileSync(join(run.root, 'REPORT.md'), md);
     this.swarm.emit({ kind: 'run.report', runId: run.id, markdown: md, path: join(run.root, 'REPORT.md') });
@@ -188,4 +202,32 @@ export class Optimizer {
     for (const t of o.cfg.targets) { const s = join(o.optDir, 'snap', id, t); if (existsSync(s)) cpSync(s, join(this.swarm.settings.dir, t), { recursive: true }); }
     return `applied ${id} (score ${o.archive.champion.score}) to ${this.swarm.settings.dir}`;
   }
+}
+
+/** The user's research program (autoresearch's program.md): read by every agent. */
+export function readProgram(dir) {
+  for (const f of [join(dir, 'program.md'), join(dir, '.ratchet', 'program.md')]) {
+    try { const t = readFileSync(f, 'utf8').trim(); if (t) return t.slice(0, 8000); } catch { /* next */ }
+  }
+  return '';
+}
+
+/** Git as the ratchet: each champion is committed on its own branch through a private worktree. */
+function gitRatchet(dir, scratch, runId) {
+  const git = (args, cwd = dir) => execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' }).trim();
+  try { if (git(['rev-parse', '--is-inside-work-tree']) !== 'true') return null; git(['rev-parse', 'HEAD']); } catch { return null; }
+  const branch = `ratchet/${runId}`;
+  const tree = join(scratch, 'git');
+  try { git(['worktree', 'add', '-f', '-B', branch, tree, 'HEAD']); } catch { return null; }
+  return {
+    branch,
+    commit(snap, targets, message) {
+      try {
+        for (const t of targets) if (existsSync(join(snap, t))) cpSync(join(snap, t), join(tree, t), { recursive: true });
+        git(['add', '--', ...targets], tree);
+        git(['-c', 'user.name=Ratchet', '-c', 'user.email=ratchet@localhost', 'commit', '-q', '-m', message], tree);
+      } catch { /* nothing to commit or git unavailable */ }
+    },
+    close() { git(['worktree', 'remove', '--force', tree]); },
+  };
 }

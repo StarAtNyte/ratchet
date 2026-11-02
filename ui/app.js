@@ -32,7 +32,11 @@ function say(text, cls = '') { const transcript = $('#terminalTranscript'); stic
 
 // command catalogue drives completion and the suggestion list
 const CATALOG = [
-  ['run', '<task>', 'launch a research swarm'],
+  ['run', '[-m research|math|kernel|score|build] <task>', 'start a run in a mode'],
+  ['math', '<task>', 'math mode: proofs, conjectures, counterexamples'],
+  ['score', '<task>', 'score improvement on a benchmark or competition'],
+  ['build', '<task>', 'engineering mode: design, implement, test'],
+  ['modes', '', 'what each mode does'],
   ['follow', '<instruction>', 'queue instructions for the active swarm'],
   ['kernel', 'list | check | run', 'run kernel optimization campaigns'],
   ['opt', 'init | start [goal] | apply', 'evolutionary optimise loop'],
@@ -251,7 +255,7 @@ function apply(ev) {
   S.lastSeq = Math.max(S.lastSeq, ev.seq || 0);
   const showOutput = !ev.seq || ev.seq > S.clearSeq;
   switch (ev.kind) {
-    case 'hello': S.settings = ev.settings; S.commands = ev.commands; S.harnesses = ev.harnesses ?? []; renderHeader(); break;
+    case 'hello': S.settings = ev.settings; S.commands = ev.commands; S.harnesses = ev.harnesses ?? []; S.modes = ev.modes ?? []; renderHeader(); break;
     case 'settings': S.settings = ev.settings; renderHeader(); break;
     case 'term': if (showOutput) say(ev.text, ev.cls); break;
     case 'account': S.accounts.set(ev.account.id, ev.account); renderAccounts(); break;
@@ -263,7 +267,7 @@ function apply(ev) {
       break;
     }
     case 'account.remove': S.accounts.delete(ev.id); renderAccounts(); break;
-    case 'run.start': { const r = run(ev.runId); r.task = ev.task; r.startedAt = ev.t; r.status = 'running'; r.cleared = !showOutput; if (showOutput && (!ev.restored || !cur() || cur().status !== 'running')) { S.current = ev.runId; S.focus = null; resetPanes(); } renderRunbar(); break; }
+    case 'run.start': { const r = run(ev.runId); r.task = ev.task; r.mode = ev.mode ?? r.mode; r.startedAt = ev.t; r.status = 'running'; r.cleared = !showOutput; if (showOutput && (!ev.restored || !cur() || cur().status !== 'running')) { S.current = ev.runId; S.focus = null; resetPanes(); } renderRunbar(); break; }
     case 'agent.start': { const r = run(ev.runId); r.agents.set(ev.id, { id: ev.id, role: ev.role, title: ev.title, parent: ev.parent, harness: null, account: null, status: 'queued', born: ev.t, prompt: ev.prompt, failovers: 0, attempts: [] }); renderRunbar(); break; }
     case 'agent.assign': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} started on ${ev.account} (${ev.harness})${ev.attempt ? ` · retry ${ev.attempt}` : ''}`, 'dim'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { Object.assign(a, { harness: ev.harness, account: ev.account, status: 'running', pulse: ev.t, startedAt: a.startedAt ?? ev.t }); (a.attempts ??= []).push(ev.account); (a.timeline ??= []).push({ t: ev.t, kind: 'start', account: ev.account, harness: ev.harness }); } break; }
     case 'agent.failover': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} is switching accounts after ${ev.from}`, 'warn'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.status = 'queued'; a.flash = ev.t; a.failovers = (a.failovers ?? 0) + 1; (a.timeline ??= []).push({ t: ev.t, kind: 'limit', account: ev.from }); } break; }
@@ -350,7 +354,8 @@ function renderRunhead() {
   if (best) parts.push(`best score ${Number(best.score).toFixed(3)}`);
   const select = runs.length > 1 ? `<select id="runPick" aria-label="Choose a run">${runs.map((x) => `<option value="${esc(x.id)}" ${x.id === r.id ? 'selected' : ''}>${esc(x.task.slice(0, 60))} (${esc(STATUS_TEXT[x.status] ?? x.status)})</option>`).join('')}</select>` : '';
   const canResume = ['interrupted', 'failed', 'stopped'].includes(r.status) && !/^optimize|^ad-hoc|^kernel/.test(r.task);
-  box.innerHTML = `<div class="rh-main"><div class="rh-title"><span class="status s-${esc(r.status)}">${esc(STATUS_TEXT[r.status] ?? r.status)}</span><h1 title="${esc(r.task)}">${esc(r.task)}</h1></div><p class="rh-meta">${esc(parts.join(' · '))}</p></div>
+  const modeLabel = (S.modes ?? []).find((m) => m.id === r.mode)?.label ?? (/^optimize/.test(r.task) ? 'Optimise loop' : '');
+  box.innerHTML = `<div class="rh-main"><div class="rh-title"><span class="status s-${esc(r.status)}">${esc(STATUS_TEXT[r.status] ?? r.status)}</span>${modeLabel ? `<span class="mode-tag">${esc(modeLabel)}</span>` : ''}<h1 title="${esc(r.task)}">${esc(r.task)}</h1></div><p class="rh-meta">${esc(parts.join(' · '))}</p></div>
     <div class="rh-actions">${select}${r.status === 'running' && !/^optimize|^ad-hoc/.test(r.task) ? '<button type="button" id="rhFollow">Add instruction</button>' : ''}${r.status === 'running' ? '<button type="button" id="rhStop" class="danger">Stop</button>' : ''}${canResume ? '<button type="button" id="rhResume" class="primary">Resume</button>' : ''}</div>`;
   box.querySelector('#runPick')?.addEventListener('change', (e) => { S.current = e.target.value; S.focus = null; resetPanes(); renderRunhead(); renderStats(); scheduleLists(); });
   box.querySelector('#rhStop')?.addEventListener('click', () => sendCmd(`stop ${r.id}`));
@@ -1124,3 +1129,43 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#age
 
 $('#accToggle').onclick = () => $('#accounts').classList.toggle('open');
 document.addEventListener('mousedown', (e) => { const a = $('#accounts'); if (a.classList.contains('open') && !a.contains(e.target) && e.target.id !== 'accToggle') a.classList.remove('open'); });
+
+// ---------- new run: choose a mode, describe the task ----------
+const RM = { mode: 'research' };
+const MODE_HINT = {
+  research: 'Reads papers, invents and tests new methods, and has every claim checked by a different model.',
+  math: 'Works through known results, conjectures, proof attempts and counterexample search. Proofs are checked step by step.',
+  kernel: 'Profiles, reads kernel literature and builds faster kernels with correctness checks. For a ForgeKernel task folder, use Kernel campaigns in the Agents panel.',
+  score: 'With a ratchet.json evaluator in the workspace this starts the optimise loop; otherwise the swarm builds the evaluator first.',
+  build: 'Designs, implements and tests a feature in the workspace, then reviews it.',
+};
+function openRunModal() {
+  const box = $('#modeCards'); box.innerHTML = '';
+  const modes = S.modes?.length ? S.modes : Object.keys(MODE_HINT).map((id) => ({ id, label: id, summary: MODE_HINT[id] }));
+  for (const m of modes) {
+    const b = el('button', `mode-card${m.id === RM.mode ? ' on' : ''}`, `<b>${esc(m.label)}</b><span>${esc(m.summary)}</span>`);
+    b.type = 'button'; b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(m.id === RM.mode));
+    b.onclick = () => { RM.mode = m.id; openRunModal(); $('#runTask').focus(); };
+    box.append(b);
+  }
+  $('#runHint').textContent = MODE_HINT[RM.mode] ?? '';
+  $('#runRounds').value = String(S.settings.rounds ?? 0);
+  $('#runErr').textContent = '';
+  if ($('#runModal').hidden) { $('#runModal').hidden = false; $('#runTask').focus(); }
+}
+const closeRunModal = () => { $('#runModal').hidden = true; };
+$('#newRun').onclick = openRunModal;
+$('#newRunEmpty').onclick = openRunModal;
+$('#runCancel').onclick = closeRunModal;
+$('#runModal').addEventListener('mousedown', (e) => { if (e.target.id === 'runModal') closeRunModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#runModal').hidden) closeRunModal(); });
+$('#runTask').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#runGo').click(); });
+$('#runGo').onclick = async () => {
+  const task = $('#runTask').value.trim().replace(/\s+/g, ' ');
+  if (!task) { $('#runErr').textContent = 'Describe what the swarm should work on.'; return; }
+  if (![...S.accounts.values()].some((a) => a.enabled !== false && a.authed !== false)) { $('#runErr').textContent = 'Add and sign in to an account first.'; return; }
+  const rounds = Number($('#runRounds').value);
+  if (rounds !== (S.settings.rounds ?? 0)) await sendCmd(`set rounds ${rounds}`);
+  await sendCmd(`run -m ${RM.mode} ${task}`);
+  $('#runTask').value = ''; closeRunModal();
+};
