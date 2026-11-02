@@ -19,6 +19,9 @@ export class Archive {
   /** Add an entry; returns true when it becomes the new champion (the ratchet only turns forward). */
   add(e) {
     this.entries.push(e);
+    // offspring counts drive ShinkaEvolve-style sampling: rarely-expanded parents get more chances
+    const parent = e.parent && this.entries.find((x) => x.id === e.parent);
+    if (parent) parent.children = (parent.children ?? 0) + 1;
     if (!e.ok) return false;
     const key = `${e.island}:${e.family}`;
     const cur = this.cells.get(key);
@@ -43,7 +46,11 @@ export class Archive {
     const free = pool.filter((p) => !inflight.has(p.id));
     const use = free.length ? free : pool;
     const exploit = this.rand() < 0.7;
-    const parent = exploit ? use[Math.floor(this.rand() ** 2 * use.length)] : use[Math.floor(this.rand() * use.length)];
+    // weight = rank preference (exploit only) x 1/(1 + offspring), so good but under-explored parents win
+    const w = use.map((p, i) => (exploit ? 1 / (1 + i) : 1) / (1 + (p.children ?? 0)));
+    let pick = this.rand() * w.reduce((a, b) => a + b, 0);
+    let parent = use[use.length - 1];
+    for (let i = 0; i < use.length; i++) { pick -= w[i]; if (pick <= 0) { parent = use[i]; break; } }
     const inspirations = this.ranked().filter((c) => c.id !== parent.id && c.family !== parent.family).slice(0, 2);
     return { parent, island, inspirations };
   }

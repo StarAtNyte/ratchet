@@ -85,3 +85,14 @@ test('mock research round runs plan, research, verify, rank, synth and judge', a
   assert.ok(existsSync(join(run.root, 'score.json')));
   assert.ok(JSON.parse(readFileSync(join(run.root, 'claims.json'), 'utf8')).length > 0);
 });
+
+test('archive counts offspring and prefers under-explored parents', async () => {
+  const { Archive } = await import('../src/archive.mjs');
+  let i = 0; const seq = [0.0, 0.9, 0.5]; // island 0, explore branch, then mid pick
+  const a = new Archive({ direction: 'min', islands: 1, rand: () => seq[i++ % seq.length] });
+  a.add({ id: 'p', island: 0, family: 'a', ok: true, score: 10 });
+  a.add({ id: 'q', island: 0, family: 'b', ok: true, score: 11 });
+  for (let k = 0; k < 6; k++) a.add({ id: `c${k}`, parent: 'p', island: 0, family: 'a', ok: false, score: NaN });
+  assert.equal(a.entries.find((e) => e.id === 'p').children, 6);
+  assert.equal(a.sample().parent.id, 'q', 'explore pick goes to the parent with fewer offspring');
+});

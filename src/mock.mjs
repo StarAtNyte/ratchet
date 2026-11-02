@@ -50,7 +50,8 @@ async function runMockInner({ account, prompt, onLog, signal }) {
       await step('text', 'Trying a tiled variant of the inner loop.');
       await step('tool', 'Bash python bench.py');
       const fam = ['tiling', 'fusion', 'vectorize', 'cache-blocking', 'unroll'][Math.floor(Math.random() * 5)];
-      return { ok: true, text: `\`\`\`json\n${JSON.stringify({ idea: `${fam} variant of the hot loop`, family: fam })}\n\`\`\`` };
+      const knob = ['block size', 'unroll factor', 'vector width', 'tile shape', 'prefetch distance'][Math.floor(Math.random() * 5)];
+      return { ok: true, text: `\`\`\`json\n${JSON.stringify({ idea: `${fam} of the hot loop with ${knob} ${2 ** (2 + Math.floor(Math.random() * 6))}`, family: fam })}\n\`\`\`` };
     }
 
     if (role === 'worker') {

@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { cpSync, mkdirSync, existsSync, readFileSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
 import { Archive } from './archive.mjs';
+import { similarity, ucb1 } from './methods.mjs';
 import { extractJson } from './swarm.mjs';
 
 const SKIP = /(^|\/)(\.git|\.ratchet|node_modules|__pycache__|\.venv)$/;
@@ -99,7 +100,7 @@ export class Optimizer {
     const { cfg, archive, failures } = o;
     const insp = inspirations.map((e) => `- ${e.id} score ${e.score} family ${e.family}: ${e.idea} (files: ${join(o.optDir, 'snap', e.id)})`).join('\n') || '(none yet)';
     const fails = failures.slice(-12).map((f) => `- ${f.idea}: ${f.reason}`).join('\n') || '(none yet)';
-    return `[[ROLE:cand]]\nYou are one mutation worker in an evolutionary optimisation loop.\nObjective: ${cfg.objective}\nDirection: ${cfg.direction === 'min' ? 'LOWER' : 'HIGHER'} score is better. Current champion: ${archive.champion?.score ?? 'baseline pending'}. Parent (${parent?.id ?? 'baseline'}) score: ${parent?.score ?? 'n/a'}.\n\nWork ONLY in ${workDir}. Edit only these target files: ${cfg.targets.join(', ')}. Changes to any other file are discarded and count as cheating.\nYou may run the evaluator yourself to check: ${[].concat(cfg.eval).join(' && ')}\n\nTry ONE focused, meaningfully different idea. Diverse inspirations from other method families:\n${insp}\n\nFailed ideas, do not repeat:\n${fails}\n\nFinish with ONE JSON block: \`\`\`json\n{"idea":"one sentence","family":"short method-family tag"}\n\`\`\``;
+    return `[[ROLE:cand]]\nYou are one mutation worker in an evolutionary optimisation loop.\nObjective: ${cfg.objective}\nDirection: ${cfg.direction === 'min' ? 'LOWER' : 'HIGHER'} score is better. Current champion: ${archive.champion?.score ?? 'baseline pending'}. Parent (${parent?.id ?? 'baseline'}) score: ${parent?.score ?? 'n/a'}.${parent?.diag ? `\nParent evaluation output (use it to decide what to change):\n${parent.diag}` : ''}\n\nWork ONLY in ${workDir}. Edit only these target files: ${cfg.targets.join(', ')}. Changes to any other file are discarded and count as cheating.\nYou may run the evaluator yourself to check: ${[].concat(cfg.eval).join(' && ')}\n\nTry ONE focused, meaningfully different idea. Diverse inspirations from other method families:\n${insp}\n\nFailed ideas, do not repeat:\n${fails}\n\nFinish with ONE JSON block: \`\`\`json\n{"idea":"one sentence","family":"short method-family tag"}\n\`\`\``;
   }
 
   async lane(o) {
@@ -114,7 +115,13 @@ export class Optimizer {
         copyTree(sw.settings.dir, work);
         if (parent) for (const t of cfg.targets) if (existsSync(join(o.optDir, 'snap', parent.id, t))) cpSync(join(o.optDir, 'snap', parent.id, t), join(work, t), { recursive: true });
       }
-      const res = await sw.agent(run, { id, role: 'cand', title: `gen ${iter}`, parent: parent && parent.id !== 'base' ? parent.id : 'lead', pref: iter % cfg.strongEvery === 0 ? 'claude' : 'any', cwd: work, prompt: this.prompt(o, id, work, parent, inspirations) });
+      // model choice: every strongEvery-th mutation goes to the strong model, the rest to a UCB1 bandit over harnesses
+      const harnesses = [...new Set(sw.pool.list().filter((a) => a.enabled !== false && a.authed !== false).map((a) => a.harness))];
+      o.arms ??= new Map();
+      for (const h of harnesses) if (!o.arms.has(h)) o.arms.set(h, { id: h, pulls: 0, reward: 0 });
+      const arm = iter % cfg.strongEvery === 0 || !harnesses.length ? null : ucb1(harnesses.map((h) => o.arms.get(h)));
+      const pref = arm ? arm.id : iter % cfg.strongEvery === 0 ? 'claude' : 'any';
+      const res = await sw.agent(run, { id, role: 'cand', title: `gen ${iter}`, parent: parent && parent.id !== 'base' ? parent.id : 'lead', pref, cwd: work, prompt: this.prompt(o, id, work, parent, inspirations) });
       o.inflight.delete(parent?.id ?? 'base');
       const meta = res.ok ? extractJson(res.text) ?? {} : {};
       const idea = String(meta.idea ?? (res.ok ? 'unspecified change' : 'agent failed'));
@@ -123,13 +130,20 @@ export class Optimizer {
       if (res.ok) {
         const snap = join(o.optDir, 'snap', id);
         if (!sw.settings.mock) { mkdirSync(snap, { recursive: true }); for (const t of cfg.targets) if (existsSync(join(work, t))) cpSync(join(work, t), join(snap, t), { recursive: true }); }
-        ev = await this.evaluate(o, id, snap, false);
+        // novelty gate (ShinkaEvolve): a near-copy of an existing program is not worth an evaluation
+        const text = sw.settings.mock ? idea : cfg.targets.map((t) => { try { return readFileSync(join(snap, t), 'utf8'); } catch { return ''; } }).join('\n');
+        o.texts ??= new Map();
+        const threshold = sw.settings.mock ? 0.9 : 0.97;
+        const dup = [...o.texts.entries()].slice(-40).find(([, t]) => t && similarity(t, text) >= threshold);
+        o.texts.set(id, text);
+        ev = dup ? { ok: false, score: NaN, error: `not novel: near-duplicate of ${dup[0]}`, novelty: false } : await this.evaluate(o, id, snap, false);
       }
       if (!sw.settings.mock) rmSync(work, { recursive: true, force: true });
-      const entry = { id, parent: parent?.id ?? 'base', gen: iter, island, family, idea, score: ev.score, ok: ev.ok, holdout: ev.holdout, accepted: ev.accepted };
+      const entry = { id, parent: parent?.id ?? 'base', gen: iter, island, family, idea, score: ev.score, ok: ev.ok, holdout: ev.holdout, accepted: ev.accepted, harness: run.agents.get(id)?.harness, diag: String(ev.error ?? ev.output ?? (Number.isFinite(ev.score) ? `score ${ev.score}` : '')).slice(-600) };
       const champ = archive.add(entry);
+      if (arm) { arm.pulls++; if (ev.ok && parent && archive.better(ev.score, parent.score)) arm.reward++; }
       if (!ev.ok) { const f = { ts: Date.now(), idea, reason: ev.error ?? 'failed evaluation' }; o.failures.push(f); appendFileSync(join(o.optDir, 'failures.jsonl'), JSON.stringify(f) + '\n'); }
-      sw.emit({ kind: 'cand.result', runId: run.id, agentId: id, score: ev.score, ok: ev.ok, champion: champ, idea, family });
+      sw.emit({ kind: 'cand.result', runId: run.id, agentId: id, score: ev.score, ok: ev.ok, champion: champ, idea, family, novel: ev.novelty !== false });
       writeFileSync(join(o.optDir, 'archive.json'), JSON.stringify(archive.entries, null, 2));
     }
   }
