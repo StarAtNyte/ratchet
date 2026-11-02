@@ -35,12 +35,12 @@ const HELP = [
   ['stop [runId|all]', 'abort a run'],
   ['report [runId]', 'print a run report'],
   ['mode <yolo|auto>', 'yolo (default) = full permissions: codex --yolo, claude/agy --dangerously-skip-permissions; auto = sandboxed workspace-write'],
-  ['set slots|workers|timeout|rounds|budget|cost <n>', 'jobs per account / lines of attack / agent time limit (min) / research rounds (0 = until stopped) / agents per run / USD per run'],
+  ['set slots|workers|timeout|rounds|budget|cost|cpus <n>', 'jobs per account / lines of attack / agent time limit (min) / research rounds (0 = until stopped) / agents per run / USD per run / CPU cores Ratchet may use'],
   ['clear', 'clear console and activity output in this browser'],
 ];
 
 /** Execute one terminal line. `say(text, cls)` writes to the web terminal. */
-export async function execCommand(line, { say, swarm, pool, settings, optimizer, forge, remember, signal }) {
+export async function execCommand(line, { say, swarm, pool, settings, optimizer, applyCpuLimit, forge, remember, signal }) {
   const text = line.trim();
   if (!text) return;
   const [cmd, ...rest] = text.split(/\s+/);
@@ -221,6 +221,13 @@ export async function execCommand(line, { say, swarm, pool, settings, optimizer,
       const [k, v] = rest;
       const n = Number(v);
       if (k === 'rounds') { if (!(n >= 0 && n <= 1000)) return say('usage: set rounds <0-1000>  (0 = keep going until stopped)', 'err'); settings.rounds = n; swarm.emit({ kind: 'settings', settings: { ...settings } }); return say(n ? `research runs stop after ${n} round(s)` : 'research runs keep going until you stop them', 'ok'); }
+      if (k === 'cpus') {
+        if (!(n >= 1 && n <= 1024)) return say('usage: set cpus <n>  (cores Ratchet and its agents may use)', 'err');
+        settings.cpus = n;
+        const r = applyCpuLimit?.(n);
+        swarm.emit({ kind: 'settings', settings: { ...settings } });
+        return say(r ? `Ratchet and its agents now use cores ${r.list} (${r.pinned} processes pinned)` : `cpu budget ${n} (pinning unavailable on this system)`, 'ok');
+      }
       if (k === 'budget') { if (!(n >= 0 && n <= 1000)) return say('usage: set budget <0-1000 agents per run>  (0 = no cap)', 'err'); settings.runAgentBudget = n; swarm.emit({ kind: 'settings', settings: { ...settings } }); return say(n ? `runs stop opening agents after ${n}` : 'no agent cap per run', 'ok'); }
       if (k === 'cost') { if (!(n >= 0 && n <= 10000)) return say('usage: set cost <USD per run>  (0 = no cap; only providers that report cost count)', 'err'); settings.runCostBudget = n; swarm.emit({ kind: 'settings', settings: { ...settings } }); return say(n ? `runs stop at $${n} of reported cost` : 'no cost cap per run', 'ok'); }
       if (k === 'timeout') { if (!(n >= 1 && n <= 600)) return say('usage: set timeout <1-600 minutes>', 'err'); settings.agentTimeoutMin = n; swarm.emit({ kind: 'settings', settings: { ...settings } }); return say(`agents stop after ${n} min`, 'ok'); }

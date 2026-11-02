@@ -345,7 +345,8 @@ export class Swarm {
 
   ctx(run) {
     const program = this.program();
-    return `${program ? `Research program from the user (program.md), follow it:\n${program}\n\n` : ''}Workspace folder: ${this.settings.dir}\nRun notes folder: ${run.root}\nOverall research task: ${run.task}${run.followups?.length ? `\nAdditional user instructions for subsequent work:\n${run.followups.map((text, i) => `${i + 1}. ${text}`).join('\n')}` : ''}`;
+    const cpu = this.settings.cpus ? `Compute budget: use at most ${this.settings.cpus} CPU cores in total, shared with other agents. Never start process pools or thread pools larger than that, and prefer one process; this machine is someone's workstation.\n` : '';
+    return `${program ? `Research program from the user (program.md), follow it:\n${program}\n\n` : ''}${cpu}Workspace folder: ${this.settings.dir}\nRun notes folder: ${run.root}\nOverall research task: ${run.task}${run.followups?.length ? `\nAdditional user instructions for subsequent work:\n${run.followups.map((text, i) => `${i + 1}. ${text}`).join('\n')}` : ''}`;
   }
 
   async drive(run) {

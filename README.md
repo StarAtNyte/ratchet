@@ -213,13 +213,14 @@ Output lives in `<workspace>/.ratchet/runs/<id>/opt/`: `archive.json`, `failures
 | `accounts`, `account add\|login\|probe\|enable\|disable\|rm` | Manage the pool |
 | `runs`, `stop [id\|all]`, `report [id]` | Inspect and control runs |
 | `mode yolo\|auto` | `yolo` (default) = full permissions; `auto` = workspace-write sandbox |
-| `set slots\|workers\|timeout\|rounds\|budget\|cost <n>` | Jobs per account, lines of attack, agent time limit in minutes, rounds per run (0 = until stopped), agents per run (default 80), USD per run (0 = no cap) |
+| `set slots\|workers\|timeout\|rounds\|budget\|cost\|cpus <n>` | Jobs per account, lines of attack, agent time limit in minutes, rounds per run (0 = until stopped), agents per run (default 80), USD per run (0 = no cap), CPU cores Ratchet may use |
 | `clear` | Clear the dashboard view |
 
 ## Safety and operations
 
 - The server listens on `127.0.0.1` only, checks the `Host` header and requires the per-launch token (compared in constant time) on every API and on the event stream. Pages carry a content security policy, `nosniff`, `no-referrer` and `frame-ancestors 'none'`.
 - Agents run with **full permissions by default** (`yolo`): Codex with no sandbox and no approvals (the SDK equivalent of `codex --yolo`), Claude Code and Antigravity with `--dangerously-skip-permissions`. They can run any command and edit any file your user can. Type `mode auto` (or start with `RATCHET_MODE=auto`) for the sandboxed mode.
+- CPU: Ratchet runs at the lowest CPU priority, numeric libraries in agent processes default to one thread, and Ratchet plus everything it starts is pinned to a core budget (default a quarter of the machine, at least 2; `RATCHET_CPUS` or `set cpus <n>` to change it live). Agents are told the budget and must not start large process pools. Evaluations run under `nice`.
 - Budgets: every run stops opening agents after `set budget` agents (default 80) and stops entirely when reported cost reaches `set cost` dollars. Each agent is stopped after `set timeout` minutes (default 30).
 - `GET /api/health` returns `{ok, version, uptimeSec}` without a token for service managers. `GET /api/metrics?t=<token>` returns runs, agents, token and cost totals and per-account state.
 - `~/.ratchet/ratchet.log` is a JSON-lines operations log (run starts and ends, plans, scores, failovers, strikes, agent failures), rotated at 5 MB.

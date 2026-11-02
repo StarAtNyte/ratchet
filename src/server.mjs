@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync, rmSync, appendFileSync, renameSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, availableParallelism, setPriority } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { dirname, join, extname, resolve } from 'node:path';
@@ -28,6 +29,30 @@ const VENDOR = {
 };
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 const MAX_EVENTS = 4000;
+
+/**
+ * Keep the machine usable: Ratchet and everything it starts run at the lowest CPU priority,
+ * numeric libraries default to one thread, and the whole process tree is pinned to a core
+ * budget (children inherit the affinity of the server). Linux only; elsewhere it is a no-op.
+ */
+export function applyCpuLimit(cpus) {
+  const total = availableParallelism();
+  const n = Math.max(1, Math.min(total, Math.floor(cpus)));
+  const list = `${total - n}-${total - 1}`; // the highest-numbered cores, away from core 0
+  const pinned = [];
+  const walk = (pid) => {
+    try { execFileSync('taskset', ['-a', '-cp', list, String(pid)], { stdio: 'ignore' }); pinned.push(pid); } catch { /* not Linux or no taskset */ }
+    let kids = [];
+    try { kids = execFileSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).trim().split('\n').filter(Boolean); } catch { /* no children */ }
+    for (const k of kids) walk(Number(k));
+  };
+  walk(process.pid);
+  return { cpus: n, list, pinned: pinned.length };
+}
+function quietDefaults() {
+  try { setPriority(19); } catch { /* not permitted */ }
+  for (const k of ['OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS']) process.env[k] ??= '1';
+}
 const VERSION = JSON.parse(readFileSync(join(SRC, '..', 'package.json'), 'utf8')).version;
 const STARTED = Date.now();
 const LOG = join(HOME, 'ratchet.log');
@@ -63,12 +88,15 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
     for (const c of clients) c.write(data);
   };
 
-  const settings = { dir, mode: process.env.RATCHET_MODE === 'auto' ? 'auto' : 'yolo', mock, slots: 4, workers: 12, agentTimeoutMin: 30, rounds: 0, runAgentBudget: 80, runCostBudget: 0, recent: loadRecent().filter((d) => existsSync(d)) };
+  quietDefaults();
+  const cpus = Number(process.env.RATCHET_CPUS) || Math.max(2, Math.floor(availableParallelism() / 4));
+  const settings = { cpus, dir, mode: process.env.RATCHET_MODE === 'auto' ? 'auto' : 'yolo', mock, slots: 4, workers: 12, agentTimeoutMin: 30, rounds: 0, runAgentBudget: 80, runCostBudget: 0, recent: loadRecent().filter((d) => existsSync(d)) };
   const remember = (d) => {
     settings.recent = [d, ...settings.recent.filter((x) => x !== d)].slice(0, 8);
     try { writeFileSync(STATE, JSON.stringify({ recent: settings.recent })); } catch { /* best effort */ }
   };
   remember(dir);
+  applyCpuLimit(settings.cpus);
   const pool = new AccountPool(emit, { mock });
   const swarm = new Swarm({ pool, emit, settings });
   const optimizer = new Optimizer(swarm);
@@ -309,7 +337,7 @@ export async function startServer({ dir, port, mock, open, stableToken = false }
       const controller = new AbortController();
       if (clientId) terminalCommands.set(clientId, controller);
       say(`❯ ${line}`, 'echo');
-      try { await execCommand(line, { say, swarm, pool, settings, optimizer, forge, remember, signal: controller.signal }); }
+      try { await execCommand(line, { say, swarm, pool, settings, optimizer, applyCpuLimit, forge, remember, signal: controller.signal }); }
       catch (e) { say(`error: ${e.message}`, 'err'); }
       finally { if (clientId && terminalCommands.get(clientId) === controller) terminalCommands.delete(clientId); }
       return void res.writeHead(204).end();
