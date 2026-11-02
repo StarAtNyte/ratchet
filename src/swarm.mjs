@@ -57,7 +57,13 @@ export class Swarm {
       }
       const free = usable.filter((a) => this.pool.free(a, this.settings.slots));
       const preferred = pref && pref !== 'any' ? free.filter((a) => a.harness === pref) : free;
-      const candidates = (preferred.length ? preferred : strict && pref && pref !== 'any' ? [] : free).sort((x, y) => x.load - y.load || x.done - y.done);
+      let pool = preferred.length ? preferred : strict && pref && pref !== 'any' ? [] : free;
+      // spread quota: when every preferred account is already busy and another provider has an idle account, use it
+      if (!strict && !pin && pref && pref !== 'any' && preferred.length && Math.min(...preferred.map((a) => a.load)) >= 1) {
+        const idle = free.filter((a) => a.load === 0 && a.harness !== pref);
+        if (idle.length) pool = idle;
+      }
+      const candidates = pool.sort((x, y) => x.load - y.load || x.done - y.done);
       if (candidates.length) { const a = candidates[0]; a.load++; return a; }
       await sleep(400, signal);
     }

@@ -96,3 +96,17 @@ test('archive counts offspring and prefers under-explored parents', async () => 
   assert.equal(a.entries.find((e) => e.id === 'p').children, 6);
   assert.equal(a.sample().parent.id, 'q', 'explore pick goes to the parent with fewer offspring');
 });
+
+test('scheduler spreads work to an idle provider when the preferred account is busy', async () => {
+  const { Swarm } = await import('../src/swarm.mjs');
+  const acc = (id, harness, load) => ({ id, harness, load, done: 0, limitedUntil: 0, authed: true, enabled: true });
+  const accounts = [acc('codex-2', 'codex', 1), acc('claude-1', 'claude', 0)];
+  const pool = { list: () => accounts, refresh: () => {}, free: (a, cap) => a.load < cap, publish: () => {} };
+  const swarm = new Swarm({ pool, emit: () => {}, settings: { slots: 4 } });
+  const ctl = new AbortController();
+  assert.equal((await swarm.acquire('codex', ctl.signal, () => {})).id, 'claude-1');
+  accounts[1].load = 1; accounts[0].load = 1;
+  assert.equal((await swarm.acquire('codex', ctl.signal, () => {})).id, 'codex-2', 'with no idle alternative the preferred provider is used');
+  accounts.forEach((a) => { a.load = 1; });
+  assert.equal((await swarm.acquire('codex', ctl.signal, () => {}, null, new Set(), true)).harness, 'codex', 'verification stays strict');
+});
