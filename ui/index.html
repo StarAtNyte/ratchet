@@ -15,46 +15,46 @@
     <div class="brand">
       <svg id="gear" viewBox="-50 -50 100 100" aria-hidden="true">
         <g id="gearRot">
-          <path d="M0-44l6 0 3 9 8 3 9-4 8 8-4 9 3 8 9 3v12l-9 3-3 8 4 9-8 8-9-4-8 3-3 9h-12l-3-9-8-3-9 4-8-8 4-9-3-8-9-3v-12l9-3 3-8-4-9 8-8 9 4 8-3 3-9z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
-          <circle r="14" fill="none" stroke="currentColor" stroke-width="3"/>
+          <path d="M0-44l6 0 3 9 8 3 9-4 8 8-4 9 3 8 9 3v12l-9 3-3 8 4 9-8 8-9-4-8 3-3 9h-12l-3-9-8-3-9 4-8-8 4-9-3-8-9-3v-12l9-3 3-8-4-9 8-8 9 4 8-3 3-9z" fill="none" stroke="currentColor" stroke-width="5" stroke-linejoin="round"/>
+          <circle r="14" fill="none" stroke="currentColor" stroke-width="5"/>
         </g>
-        <path d="M44-6l12 6-12 6z" fill="var(--hot)"/>
       </svg>
       <span class="word">Ratchet</span>
-      <span class="tag">swarm research</span>
     </div>
-    <button class="ws" id="ws" title="Change workspace folder"></button>
+    <button type="button" class="ws" id="ws" title="Change workspace folder"></button>
     <button type="button" class="chip" id="accToggle" aria-controls="accounts">Accounts</button>
-    <div class="chip mock" id="mockChip" hidden>mock</div>
-    <div class="chip" id="modeChip">auto</div>
-    <div class="chip live" id="conn">connecting</div>
-    <div class="clock" id="clock"></div>
+    <dl class="meters" id="meters"></dl>
+    <div class="chip mock" id="mockChip" hidden>Mock agents</div>
+    <div class="chip" id="modeChip" title="Agent permission level">auto</div>
+    <div class="chip live" id="conn">Connecting</div>
+    <div class="clock" id="clock" hidden></div>
   </header>
 
   <aside id="accounts">
-    <h2><span>Accounts</span><span class="h2r"><em id="poolSum"></em><button id="addAcc" type="button">+ Add</button></span></h2>
+    <h2><span>Accounts</span><span class="h2r"><span class="count" id="poolSum"></span><button id="addAcc" type="button">+ Add</button></span></h2>
     <div id="accList"></div>
-    <div class="hint">add one: <code>account add claude</code></div>
+    <div class="hint">Drag an account to <b>Not using</b> to keep work off it.</div>
   </aside>
 
   <main>
     <section id="graphWrap">
-      <div class="runbar" id="runbar"></div>
-      <div class="overview" id="overview" hidden></div>
-      <div class="gtools" role="toolbar" aria-label="Graph view"><button type="button" id="gFit" title="Fit everything (double-click the graph or press F)">fit</button><button type="button" id="gOut" title="Zoom out">−</button><button type="button" id="gIn" title="Zoom in">+</button><button type="button" id="gLayout" title="Switch layout">tree</button></div>
-      <canvas id="graph" aria-label="Agent swarm graph: each node is an agent, edges show who spawned whom"></canvas>
-      <div class="legend"><span><i class="c-claude"></i>claude</span><span><i class="c-codex"></i>codex</span><span><i class="c-antigravity"></i>antigravity</span><span><i class="c-bad"></i>failed</span></div>
-      <div class="empty" id="graphEmpty">
-        <div class="big">No active run</div>
-        <div>Enter run followed by a research task in the Terminal</div>
+      <div class="runhead" id="runhead"></div>
+      <div class="graph-area">
+        <canvas id="graph" aria-label="Agent swarm graph: each card is an agent, lines show who started whom"></canvas>
+        <div class="gtools" role="toolbar" aria-label="Graph view"><button type="button" id="gFit" title="Fit everything (double-click the graph or press F)">Fit</button><button type="button" id="gOut" title="Zoom out" aria-label="Zoom out">−</button><button type="button" id="gIn" title="Zoom in" aria-label="Zoom in">+</button><button type="button" id="gLayout" title="Switch layout">Radial</button></div>
+        <div class="legend"><span><i class="c-claude"></i>Claude</span><span><i class="c-codex"></i>Codex</span><span><i class="c-antigravity"></i>Antigravity</span><span><i class="c-bad"></i>Failed</span></div>
+        <div class="empty" id="graphEmpty">
+          <div class="big">Start a research run</div>
+          <div class="empty-sub">Describe a question in the Terminal tab below, for example <code>run why does warmup help Adam</code>.</div>
+        </div>
       </div>
     </section>
     <div class="splitter" id="split" role="separator" aria-orientation="horizontal" aria-label="Resize the graph and terminal" tabindex="0"></div>
     <section id="term">
       <div class="termbar">
         <div class="ttabs" role="tablist">
-          <button type="button" data-tt="console" class="on" role="tab">Terminal</button>
-          <button type="button" data-tt="activity" role="tab">Activity</button>
+          <button type="button" data-tt="activity" class="on" role="tab">Activity</button>
+          <button type="button" data-tt="console" role="tab">Terminal</button>
         </div>
         <span class="tcwd" id="tcwd"></span>
         <div class="tacts">
@@ -65,7 +65,7 @@
         </div>
       </div>
       <div id="commandReference" class="command-reference" hidden><div class="command-reference-head"><strong>Ratchet commands</strong><span>Select a command to add it to the prompt</span></div><div id="commandList"></div></div>
-      <div class="tview on" id="consoleView">
+      <div class="tview" id="consoleView">
         <div id="terminalTranscript">
         <div id="termOut" aria-live="polite" aria-label="Terminal output"></div>
         <form id="termForm" autocomplete="off">
@@ -76,7 +76,7 @@
         <div id="terminalShell" hidden><div id="xterm"></div></div>
         <div id="suggest" role="listbox" hidden></div>
       </div>
-      <div class="tview" id="activityView"><div class="activity-tools" id="activityTools"><span>Agent updates</span><button type="button" id="feedDetail" aria-pressed="false">Show tool calls</button></div><div id="feed"></div><div class="focus" id="focus" hidden></div></div>
+      <div class="tview on" id="activityView"><div class="activity-tools" id="activityTools"><span id="activityScope">All agents</span><button type="button" id="feedDetail" aria-pressed="false">Show tool calls</button></div><div id="feed"></div><div class="focus" id="focus" hidden></div></div>
     </section>
   </main>
 
@@ -88,7 +88,7 @@
     </nav>
     <div class="pane on" id="agents"></div>
     <div class="pane" id="claims"></div>
-    <div class="pane" id="report"><div class="muted">report appears when the swarm finishes</div></div>
+    <div class="pane" id="report"><div class="muted">The report appears when the round finishes.</div></div>
   </aside>
 </div>
 <div id="picker" class="modal" hidden>
@@ -147,7 +147,7 @@
     <div id="agentDetailBody"></div>
   </div>
 </div>
-<aside id="drawer" hidden><div class="dhead"><b id="dtitle"></b><button id="dclose" type="button" aria-label="Close details">Close</button></div><div id="dbody"></div></aside>
+<aside id="drawer" hidden aria-label="Agent inspector"><div class="dhead"><div class="dtitle-wrap"><b id="dtitle"></b><span id="dsub"></span></div><button id="dclose" type="button" aria-label="Close agent inspector">Close</button></div><div id="dbody"></div></aside>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>
 <script src="/app.js" type="module"></script>

@@ -4,7 +4,7 @@ const terminalClientId = sessionStorage.getItem('ratchet.terminal.client') || cr
 sessionStorage.setItem('ratchet.terminal.client', terminalClientId);
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const COLORS = {};
-const loadColors = () => Object.assign(COLORS, { claude: css('--harness-claude'), codex: css('--harness-codex'), antigravity: css('--harness-antigravity'), lead: css('--color-ink'), bad: css('--color-bad'), none: css('--harness-other'), ok: css('--color-ok'), warn: css('--color-accent'), accent: css('--color-accent'), paper: css('--color-paper-3'), panel: css('--color-paper-2'), rule: css('--color-rule'), muted: css('--color-muted'), ink2: css('--color-ink-2') });
+const loadColors = () => Object.assign(COLORS, { claude: css('--harness-claude'), codex: css('--harness-codex'), antigravity: css('--harness-antigravity'), lead: css('--color-ink'), bad: css('--color-bad'), none: css('--harness-other'), ok: css('--color-ok'), warn: css('--color-accent'), accent: css('--color-accent'), paper: css('--color-paper-3'), panel: css('--color-paper-2'), rule: css('--color-rule'), rule2: css('--color-rule-2'), raised: css('--color-raised') || css('--color-paper-2'), muted: css('--color-muted'), ink2: css('--color-ink-2') });
 loadColors();
 const tint = (c, pct) => `color-mix(in oklab, ${c} ${pct}%, transparent)`;
 
@@ -164,7 +164,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------- terminal tabs, shell, split, expand ----------
-const TT = { tab: 'console', shell: false };
+const TT = { tab: 'activity', shell: false };
 const shell = { term: null, fit: null, id: null, es: null, dead: false, inputQueue: Promise.resolve() };
 const shellPost = (op, data) => fetch(`/api/shell/${op}`, { method: 'POST', headers: { 'x-ratchet-token': token, 'content-type': 'application/json' }, body: JSON.stringify(data) });
 async function openShell() {
@@ -204,6 +204,7 @@ function setTermTab(tab) {
   if (tab === 'console') { if (TT.shell) { try { shell.fit?.fit(); } catch {} shell.term?.focus(); } else termIn.focus(); }
 }
 document.querySelectorAll('.ttabs button').forEach((b) => { b.onclick = () => setTermTab(b.dataset.tt); });
+setTermTab('activity');
 function clearOutput() {
   S.clearSeq = S.lastSeq; sessionStorage.setItem(`ratchet.clear.${token}`, String(S.clearSeq));
   termOut.replaceChildren(); shell.term?.clear();
@@ -264,11 +265,16 @@ function apply(ev) {
     case 'account.remove': S.accounts.delete(ev.id); renderAccounts(); break;
     case 'run.start': { const r = run(ev.runId); r.task = ev.task; r.startedAt = ev.t; r.status = 'running'; r.cleared = !showOutput; if (showOutput && (!ev.restored || !cur() || cur().status !== 'running')) { S.current = ev.runId; S.focus = null; resetPanes(); } renderRunbar(); break; }
     case 'agent.start': { const r = run(ev.runId); r.agents.set(ev.id, { id: ev.id, role: ev.role, title: ev.title, parent: ev.parent, harness: null, account: null, status: 'queued', born: ev.t, prompt: ev.prompt, failovers: 0, attempts: [] }); renderRunbar(); break; }
-    case 'agent.assign': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} started on ${ev.account} (${ev.harness})${ev.attempt ? ` · retry ${ev.attempt}` : ''}`, 'dim'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { Object.assign(a, { harness: ev.harness, account: ev.account, status: 'running', pulse: ev.t, startedAt: a.startedAt ?? ev.t }); (a.attempts ??= []).push(ev.account); } break; }
-    case 'agent.failover': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} is switching accounts after ${ev.from}`, 'warn'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.status = 'queued'; a.flash = ev.t; a.failovers = (a.failovers ?? 0) + 1; } break; }
+    case 'agent.assign': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} started on ${ev.account} (${ev.harness})${ev.attempt ? ` · retry ${ev.attempt}` : ''}`, 'dim'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { Object.assign(a, { harness: ev.harness, account: ev.account, status: 'running', pulse: ev.t, startedAt: a.startedAt ?? ev.t }); (a.attempts ??= []).push(ev.account); (a.timeline ??= []).push({ t: ev.t, kind: 'start', account: ev.account, harness: ev.harness }); } break; }
+    case 'agent.failover': { if (showOutput) say(`[${ev.runId}] ${ev.agentId} is switching accounts after ${ev.from}`, 'warn'); const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.status = 'queued'; a.flash = ev.t; a.failovers = (a.failovers ?? 0) + 1; (a.timeline ??= []).push({ t: ev.t, kind: 'limit', account: ev.from }); } break; }
+    case 'agent.usage': { const r = run(ev.runId); const a = r.agents.get(ev.agentId); if (a) { a.tokens = (a.tokens ?? 0) + ev.tokens; a.cost = (a.cost ?? 0) + ev.cost; } r.usage = { tokens: ev.runTokens, cost: ev.runCost }; break; }
+    case 'agent.strike': { const a = run(ev.runId).agents.get(ev.agentId); if (a) { a.strikes = ev.strikes; (a.strikeReasons ??= []).push(ev.reason); } if (showOutput) say(`[${ev.runId}] ${ev.agentId} strike ${ev.strikes}: ${ev.reason}`, 'warn'); break; }
+    case 'run.plan': { const r = run(ev.runId); r.complexity = ev.complexity; r.lines = ev.lines; break; }
+    case 'run.round': { run(ev.runId).round = ev.round; break; }
+    case 'run.score': { run(ev.runId).score = ev.score; break; }
     case 'agent.end': {
       const a = run(ev.runId).agents.get(ev.agentId);
-      if (a) { a.status = ev.ok ? 'done' : ev.error === 'stopped' ? 'stopped' : 'failed'; a.error = ev.error; a.endedAt = ev.t; }
+      if (a) { a.status = ev.ok ? 'done' : ev.error === 'stopped' ? 'stopped' : 'failed'; a.error = ev.error; a.endedAt = ev.t; (a.timeline ??= []).push({ t: ev.t, kind: ev.ok ? 'done' : 'failed', account: a.account, error: ev.error }); }
       if (showOutput) say(`[${ev.runId}] ${ev.agentId} ${ev.ok ? 'finished' : ev.error === 'stopped' ? 'stopped' : `failed: ${ev.error || 'unknown error'}`}`, ev.ok ? 'ok' : 'err');
       if (ev.ok) clickGear();
       break;
@@ -303,12 +309,20 @@ function apply(ev) {
 function resetPanes() { renderFeed(); renderClaims(); renderReport(); $('#focus').hidden = true; }
 
 // ---------- renderers ----------
+function renderMeters() {
+  const r = cur(); const box = $('#meters');
+  if (!r) { box.innerHTML = ''; return; }
+  const elapsed = (r.endedAt ?? Date.now()) - (r.startedAt ?? Date.now());
+  const tok = r.usage?.tokens ?? 0; const cost = r.usage?.cost ?? 0;
+  const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+  box.innerHTML = `${r.round ? `<div><dt>Round</dt><dd>${r.round}</dd></div>` : ''}<div><dt>Elapsed</dt><dd>${fmtAgo(elapsed)}</dd></div><div><dt>Tokens</dt><dd>${fmtTok(tok)}</dd></div>${cost ? `<div><dt>Cost</dt><dd>$${cost.toFixed(2)}</dd></div>` : ''}`;
+}
 function renderHeader() {
   $('#ws').textContent = S.settings.dir;
   $('#tcwd').textContent = S.settings.dir;
   $('#promptPath').textContent = S.settings.dir;
   $('#mockChip').hidden = !S.settings.mock;
-  const m = $('#modeChip'); m.textContent = S.settings.mode; m.classList.toggle('yolo', S.settings.mode === 'yolo');
+  const m = $('#modeChip'); m.textContent = S.settings.mode === 'yolo' ? 'Full permissions' : 'Sandboxed'; m.title = S.settings.mode === 'yolo' ? 'Agents can run any command (mode yolo). Type mode auto to sandbox them.' : 'Agents are sandboxed to the workspace (mode auto).'; m.classList.toggle('yolo', S.settings.mode === 'yolo');
 }
 
 function renderStats() {
@@ -318,17 +332,30 @@ function renderStats() {
   $('#graphEmpty').classList.toggle('hide', !!r);
 }
 
-function renderRunbar() {
-  const bar = $('#runbar'); bar.innerHTML = '';
-  for (const r of S.runs.values()) {
-    if (r.cleared) continue;
-    const b = el('button', `${r.id === S.current ? 'on' : ''} ${r.status === 'running' ? 'running' : ''}`);
-    b.textContent = `${r.id} · ${r.task}`;
-    b.onclick = () => { S.current = r.id; S.focus = null; resetPanes(); renderFeed(); renderRunbar(); renderStats(); };
-    bar.append(b);
-    if (r.status === 'running' && r.id === S.current) { const x = el('button', 'stopRun'); x.type = 'button'; x.textContent = 'stop run'; x.onclick = () => sendCmd(`stop ${r.id}`); bar.append(x); }
-    if (r.status === 'interrupted' && r.id === S.current) { const x = el('button', 'stopRun'); x.type = 'button'; x.textContent = 'resume'; x.onclick = () => sendCmd(`resume ${r.id}`); bar.append(x); }
-  }
+const STATUS_TEXT = { running: 'Running', done: 'Done', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted', queued: 'Waiting' };
+function renderRunbar() { renderRunhead(); }
+function renderRunhead() {
+  const box = $('#runhead'); const r = cur();
+  const runs = [...S.runs.values()].filter((x) => !x.cleared);
+  if (!r) { box.innerHTML = ''; box.hidden = true; return; }
+  box.hidden = false;
+  const ag = [...r.agents.values()];
+  const running = ag.filter((a) => a.status === 'running').length;
+  const cl = [...r.claims.values()];
+  const v = (x) => cl.filter((q) => q.verdict === x).length;
+  const parts = [`${running} running of ${ag.length} agents`];
+  if (cl.length) parts.push(`${v('confirmed')} confirmed, ${v('refuted')} refuted${v('quarantined') ? `, ${v('quarantined')} quarantined` : ''}`);
+  if (r.score?.overall != null) parts.push(`quality ${Math.round(r.score.overall * 100)}%`);
+  const best = ag.filter((a) => a.champion && Number.isFinite(a.score)).at(-1);
+  if (best) parts.push(`best score ${Number(best.score).toFixed(3)}`);
+  const select = runs.length > 1 ? `<select id="runPick" aria-label="Choose a run">${runs.map((x) => `<option value="${esc(x.id)}" ${x.id === r.id ? 'selected' : ''}>${esc(x.task.slice(0, 60))} (${esc(STATUS_TEXT[x.status] ?? x.status)})</option>`).join('')}</select>` : '';
+  const canResume = ['interrupted', 'failed', 'stopped'].includes(r.status) && !/^optimize|^ad-hoc|^kernel/.test(r.task);
+  box.innerHTML = `<div class="rh-main"><div class="rh-title"><span class="status s-${esc(r.status)}">${esc(STATUS_TEXT[r.status] ?? r.status)}</span><h1 title="${esc(r.task)}">${esc(r.task)}</h1></div><p class="rh-meta">${esc(parts.join(' · '))}</p></div>
+    <div class="rh-actions">${select}${r.status === 'running' && !/^optimize|^ad-hoc/.test(r.task) ? '<button type="button" id="rhFollow">Add instruction</button>' : ''}${r.status === 'running' ? '<button type="button" id="rhStop" class="danger">Stop</button>' : ''}${canResume ? '<button type="button" id="rhResume" class="primary">Resume</button>' : ''}</div>`;
+  box.querySelector('#runPick')?.addEventListener('change', (e) => { S.current = e.target.value; S.focus = null; resetPanes(); renderRunhead(); renderStats(); scheduleLists(); });
+  box.querySelector('#rhStop')?.addEventListener('click', () => sendCmd(`stop ${r.id}`));
+  box.querySelector('#rhResume')?.addEventListener('click', () => sendCmd(`resume ${r.id}`));
+  box.querySelector('#rhFollow')?.addEventListener('click', () => { const text = prompt('Instruction for the agents still to start in this run:'); if (text?.trim()) sendCmd(`follow ${text.trim()}`); });
 }
 
 function renderAccounts() {
@@ -350,23 +377,21 @@ function renderAccounts() {
     groups[String(enabled)] = drop; list.append(group);
   }
   for (const a of accs) {
-    const pips = Array.from({ length: S.settings.slots ?? 2 }, (_, i) => `<i class="${i < a.load ? 'on' : ''}"></i>`).join('');
-    const d = el('div', `acc ${a.harness} ${a.status}`, `
-      <div class="top"><span class="id">${esc(a.id)}</span><span class="account-state ${a.authed === true ? 'connected' : a.authed === false ? 'disconnected' : 'unknown'}">${a.checking ? 'Checking…' : a.authed === true ? 'Signed in' : a.authed === false ? 'Sign in needed' : 'Not checked'}</span></div>
-      <div class="account-email">${esc(a.email ?? (a.checking ? 'Checking account details…' : a.authMessage ?? (a.authed === true ? 'Email not provided by provider' : a.authed === false ? 'Sign in to use this account' : 'Sign-in status unavailable')))}</div>
-      <div class="task">${esc(a.task ?? (a.status === 'limited' ? 'Usage limit reached · excluded' : a.enabled === false ? 'Excluded from new assignments' : 'idle'))}</div>
-      <div class="row"><span class="pips">${pips}</span><span>${a.done}✓ ${a.failed ? a.failed + '✗' : ''}</span>
-        <span class="${a.status === 'limited' ? 'cd' : a.authed === false ? 'auth-no' : ''}" data-until="${a.limitedUntil || 0}">${a.authed === false ? 'not logged in' : ''}</span></div>`);
+    const state = a.checking ? 'Checking' : a.authed === false ? 'Signed out' : a.status === 'limited' ? 'Limited' : a.load > 0 ? 'Working' : a.authed === true ? 'Idle' : 'Unchecked';
+    const slots = S.settings.slots ?? 2;
+    const meta = [a.model || a.plan || a.harness, a.done ? `${a.done} done` : '', a.failed ? `${a.failed} failed` : ''].filter(Boolean).join(' · ');
+    const d = el('div', `acc ${a.harness} ${a.status} ${a.authed === false ? 'signed-out' : ''}`, `
+      <div class="top"><span class="swatch" aria-hidden="true"></span><span class="id">${esc(a.id)}</span><span class="state">${esc(state)}</span></div>
+      <div class="row"><span class="meta">${esc(meta)}</span><span class="${a.status === 'limited' ? 'cd' : ''}" data-until="${a.limitedUntil || 0}"></span></div>
+      ${a.load > 0 ? `<div class="load" aria-label="${a.load} of ${slots} slots in use"><i style="width:${Math.min(100, (a.load / slots) * 100)}%"></i></div>` : ''}`);
+    d.title = a.task ? `Working on: ${a.task}` : a.email ?? '';
     d.draggable = true;
-    d.setAttribute('role', 'button'); d.tabIndex = 0; d.setAttribute('aria-label', `${a.id}, open account details`);
+    d.setAttribute('role', 'button'); d.tabIndex = 0; d.setAttribute('aria-label', `${a.id}, ${state}. Open account details`);
     d.onclick = () => openAccount(a.id);
     d.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openAccount(a.id); } };
     d.ondragstart = (event) => { event.dataTransfer.setData('text/plain', a.id); event.dataTransfer.effectAllowed = 'move'; d.classList.add('dragging'); };
     d.ondragend = () => d.classList.remove('dragging');
-    const move = el('button', 'account-move'); move.type = 'button'; move.textContent = a.enabled === false ? 'Use account' : 'Stop using';
-    move.setAttribute('aria-label', `${a.enabled === false ? 'Use' : 'Stop using'} ${a.id}`);
-    move.onclick = (event) => { event.stopPropagation(); sendCmd(`account ${a.enabled === false ? 'enable' : 'disable'} ${a.id}`); };
-    d.append(move); groups[String(a.enabled !== false)].append(d);
+    groups[String(a.enabled !== false)].append(d);
   }
   tickCountdowns();
 }
@@ -376,7 +401,7 @@ function tickCountdowns() {
     const u = Number(n.dataset.until);
     if (!u) return;
     const s = Math.max(0, Math.round((u - Date.now()) / 1000));
-    n.textContent = s ? `back ${s >= 3600 ? Math.floor(s / 3600) + 'h' : ''}${s >= 60 ? Math.floor((s % 3600) / 60) + 'm' : ''}${s % 60}s` : 'ready';
+    n.textContent = s ? `back in ${s >= 3600 ? Math.floor(s / 3600) + 'h ' : ''}${s >= 60 ? Math.floor((s % 3600) / 60) + 'm' : `${s % 60}s`}` : 'ready';
   });
 }
 
@@ -388,7 +413,7 @@ function addFeed(f) {
     const head = el('div', 'activity-head');
     const who = el('button', `activity-agent ${f.harness}`); who.type = 'button'; who.textContent = f.id; who.onclick = () => openAgent(f.id);
     const type = el('span', 'activity-kind'); type.textContent = ({ tool: 'Tool call', err: 'Error', sys: 'Status', text: 'Update' })[f.kind] || 'Update';
-    const time = el('time', 'activity-time'); if (f.t) { time.dateTime = new Date(f.t).toISOString(); time.textContent = new Date(f.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    const time = el('time', 'activity-time'); if (f.t) { time.dateTime = new Date(f.t).toISOString(); time.textContent = new Date(f.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); }
     head.append(who, type, time);
     const tx = el('div', 'activity-text'); tx.textContent = f.text;
     row.append(head, tx); box.append(row);
@@ -407,6 +432,7 @@ function focusAgent(id) {
   S.focus = S.focus === id ? null : id; renderFeed();
   const f = $('#focus'); f.hidden = !S.focus; f.textContent = S.focus ? `Showing ${S.focus} · click to show all` : '';
   f.onclick = () => focusAgent(S.focus);
+  $('#activityScope').textContent = S.focus ? `Agent ${S.focus}` : 'All agents';
 }
 
 function renderClaims() {
@@ -467,10 +493,10 @@ function targets(r) {
     let row = 0;
     const walk = (id, depth) => {
       const ks = (kids.get(id) ?? []);
-      if (!ks.length) { out.set(id, { x: depth * 280, y: row++ * 84 }); return; }
+      if (!ks.length) { out.set(id, { x: depth * 290, y: row++ * 82 }); return; }
       ks.forEach((k) => walk(k.id, depth + 1));
       const ys = ks.map((k) => out.get(k.id).y);
-      out.set(id, { x: depth * 280, y: (Math.min(...ys) + Math.max(...ys)) / 2 });
+      out.set(id, { x: depth * 290, y: (Math.min(...ys) + Math.max(...ys)) / 2 });
     };
     walk('lead', 0);
     return out;
@@ -492,14 +518,18 @@ function targets(r) {
 function bbox(tg) {
   let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
   for (const p of tg.values()) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
-  const padR = G.layout === 'tree' ? 116 : 70;
-  return { x0: x0 - (G.layout === 'tree' ? 116 : 70), y0: y0 - 60, x1: x1 + padR, y1: y1 + 70 };
+  const padR = G.layout === 'tree' ? 124 : 70;
+  return { x0: x0 - (G.layout === 'tree' ? 124 : 70), y0: y0 - 60, x1: x1 + padR, y1: y1 + 70 };
 }
 function fitTo(b, snap) {
-  const ov = $('#overview'); const cvTop = cv.getBoundingClientRect().top;
-  const top = (ov.hidden ? 44 : ov.getBoundingClientRect().bottom - cvTop) + 16; const bottom = 44; // room for the run strip and legend
-  const k = Math.min(1.6, Math.max(0.15, Math.min(W / (b.x1 - b.x0), (H - top - bottom) / (b.y1 - b.y0))));
-  const x = W / 2 - ((b.x0 + b.x1) / 2) * k; const y = top + (H - top - bottom) / 2 - ((b.y0 + b.y1) / 2) * k;
+  const top = 20; const bottom = 56; // room for the legend and zoom tools
+  // cards stay readable: below this scale the view pans instead of shrinking further
+  const minK = G.layout === 'tree' ? 0.92 : 0.15;
+  const fitK = Math.min(W / (b.x1 - b.x0), (H - top - bottom) / (b.y1 - b.y0));
+  const k = Math.min(1.25, Math.max(minK, fitK));
+  const fits = fitK >= minK;
+  const x = fits ? W / 2 - ((b.x0 + b.x1) / 2) * k : 24 - b.x0 * k;
+  const y = fits ? top + (H - top - bottom) / 2 - ((b.y0 + b.y1) / 2) * k : top - b.y0 * k;
   if (snap) Object.assign(view, { k, x, y }); else { view.k += (k - view.k) * 0.12; view.x += (x - view.x) * 0.12; view.y += (y - view.y) * 0.12; }
 }
 const toWorld = (sx, sy) => ({ x: (sx - view.x) / view.k, y: (sy - view.y) / view.k });
@@ -554,8 +584,8 @@ function frame(t) {
     const col = COLORS[harnessOf(a)] ?? COLORS.none;
     ctx.strokeStyle = a.status === 'failed' ? tint(COLORS.bad, 40) : a.status === 'done' ? tint(col, 40) : tint(col, 22);
     ctx.lineWidth = (a.status === 'running' ? 1.6 : 1) / Math.sqrt(view.k);
-    ctx.beginPath(); ctx.moveTo(p.x + (G.layout === 'tree' ? 102 : 0), p.y);
-    if (G.layout === 'tree') { const mx = (p.x + n.x) / 2; ctx.bezierCurveTo(mx, p.y, mx, n.y, n.x - 102, n.y); }
+    ctx.beginPath(); ctx.moveTo(p.x + (G.layout === 'tree' ? 110 : 0), p.y);
+    if (G.layout === 'tree') { const mx = (p.x + n.x) / 2; ctx.bezierCurveTo(mx, p.y, mx, n.y, n.x - 110, n.y); }
     else { const mx = (n.x + p.x) / 2 + (n.y - p.y) * 0.1; const my = (n.y + p.y) / 2 - (n.x - p.x) * 0.1; ctx.quadraticCurveTo(mx, my, n.x, n.y); }
     ctx.stroke();
     if (a.status === 'running') { ctx.setLineDash([4, 6]); ctx.lineDashOffset = -t / 40; ctx.strokeStyle = col; ctx.stroke(); ctx.setLineDash([]); }
@@ -568,25 +598,30 @@ function frame(t) {
     const n = N(a.id); if (!n) continue;
     const col = a.status === 'failed' ? COLORS.bad : COLORS[harnessOf(a)] ?? COLORS.none;
     if (G.layout === 'tree') {
-      const w = 204, h = 60, x = n.x - w / 2, y = n.y - h / 2;
+      const w = 220, h = 64, x = n.x - w / 2, y = n.y - h / 2;
       const isHovered = mw.x >= x && mw.x <= x + w && mw.y >= y && mw.y <= y + h;
+      const selected = drawer?.type === 'agent' && drawer.id === a.id;
       if (isHovered) hover = a;
-      ctx.fillStyle = COLORS.panel; ctx.strokeStyle = isHovered ? col : tint(col, 40); ctx.lineWidth = isHovered ? 1.8 : 1;
-      ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x + 14, y + 17, 4, 0, Math.PI * 2); ctx.fill();
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = COLORS.ink2; ctx.font = '600 11px system-ui, sans-serif';
-      ctx.fillText(a.id === 'lead' ? 'LEAD' : String(a.role || 'agent').toUpperCase(), x + 25, y + 17, 96);
-      ctx.fillStyle = a.status === 'failed' ? COLORS.bad : a.status === 'done' ? COLORS.ok : a.status === 'running' ? COLORS.accent : COLORS.muted;
-      ctx.textAlign = 'right'; ctx.font = '10px system-ui, sans-serif'; ctx.fillText(a.status || 'queued', x + w - 12, y + 17, 68);
-      ctx.textAlign = 'left'; ctx.fillStyle = COLORS.lead; ctx.font = '500 12px system-ui, sans-serif';
-      ctx.fillText(a.title || a.id, x + 12, y + 38, w - 24);
-      ctx.fillStyle = COLORS.muted; ctx.font = '10px system-ui, sans-serif';
-      const meta = [a.account || (a.id === 'lead' ? a.id : 'waiting for account'), a.score != null && Number.isFinite(a.score) ? Number(a.score).toFixed(3) : ''].filter(Boolean).join(' · ');
-      ctx.fillText(meta, x + 12, y + 52, w - 24); ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = selected ? COLORS.raised : COLORS.panel;
+      ctx.strokeStyle = selected ? COLORS.accent : isHovered ? COLORS.rule2 : COLORS.rule; ctx.lineWidth = selected ? 1.5 : 1;
+      ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = col; ctx.fillRect(x, y + 10, 3, h - 20); // provider stripe
+      ctx.textBaseline = 'middle';
+      const roleName = a.id === 'lead' ? 'Lead' : ({ worker: 'Research', sub: 'Sub-research', verify: 'Verify', judge: 'Judge', cand: 'Candidate', lead: 'Lead' })[a.role] ?? 'Agent';
+      ctx.textAlign = 'left'; ctx.fillStyle = COLORS.muted; ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(`${roleName} · ${a.id}`, x + 14, y + 16, w - 100);
+      const stCol = a.status === 'failed' ? COLORS.bad : a.status === 'done' ? COLORS.ok : a.status === 'running' ? COLORS.accent : COLORS.muted;
+      ctx.textAlign = 'right'; ctx.fillStyle = stCol; ctx.font = '500 11px system-ui, sans-serif';
+      ctx.fillText(STATUS_TEXT[a.status] ?? a.status ?? 'Waiting', x + w - 12, y + 16);
+      ctx.textAlign = 'left'; ctx.fillStyle = COLORS.lead; ctx.font = '500 13px system-ui, sans-serif';
+      ctx.fillText(a.title || a.id, x + 14, y + 35, w - 26);
+      ctx.fillStyle = COLORS.muted; ctx.font = '11px system-ui, sans-serif';
+      const meta = [a.account || (a.id === 'lead' ? '' : 'waiting for an account'), a.score != null && Number.isFinite(a.score) ? `score ${Number(a.score).toFixed(3)}` : '', a.strikes ? `${a.strikes} strike${a.strikes > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+      ctx.fillText(meta, x + 14, y + 52, w - 26); ctx.textBaseline = 'alphabetic';
       if (a.status === 'running' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        ctx.fillStyle = col; ctx.globalAlpha = 0.45 + 0.5 * (0.5 + 0.5 * Math.sin(t / 550)); ctx.beginPath(); ctx.arc(x + 14, y + 17, 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+        ctx.fillStyle = COLORS.accent; ctx.globalAlpha = 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(t / 550)); ctx.fillRect(x + 1, y + h - 3, w - 2, 2); ctx.globalAlpha = 1;
       }
+      if (a.champion) { ctx.strokeStyle = COLORS.accent; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(x - 3, y - 3, w + 6, h + 6, 8); ctx.stroke(); }
       continue;
     }
     const base = a.role === 'lead' ? 16 : a.role === 'verify' ? 8 : a.role === 'sub' || a.role === 'cand' ? 8 : 11;
@@ -652,7 +687,7 @@ cv.addEventListener('dblclick', () => { view.auto = true; syncTools(); });
 cv.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(mouse.x, mouse.y, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
 function syncTools() {
   $('#gFit').classList.toggle('on', view.auto);
-  $('#gLayout').textContent = G.layout === 'tree' ? 'radial' : 'tree';
+  $('#gLayout').textContent = G.layout === 'tree' ? 'Radial' : 'Tree';
 }
 $('#gFit').onclick = () => { view.auto = true; syncTools(); };
 $('#gIn').onclick = () => zoomAt(W / 2, H / 2, 1.25);
@@ -674,20 +709,8 @@ function spark(ag) {
   const pts = (arr) => arr.map((v, i) => `${((i / (arr.length - 1)) * w).toFixed(1)},${(h - ((v - lo) / (hi - lo || 1)) * h).toFixed(1)}`).join(' ');
   return `<div class="spark"><div><dt>best score</dt><dd>${curve[curve.length - 1].toFixed(3)}</dd></div><svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-label="best score over ${sc.length} tries"><polyline class="all" points="${pts(vals)}"/><polyline class="best" points="${pts(curve)}"/></svg></div>`;
 }
-function renderOverview() {
-  const box = $('#overview'); const r = cur();
-  if (!r) { box.hidden = true; return; }
-  box.hidden = false;
-  const ag = [...r.agents.values()];
-  const c = (st) => ag.filter((a) => a.status === st).length;
-  const cl = [...r.claims.values()];
-  const v = (x) => cl.filter((q) => q.verdict === x).length;
-  const elapsed = (r.endedAt ?? Date.now()) - (r.startedAt ?? Date.now());
-  const busy = [...S.accounts.values()].filter((a) => a.load > 0).map((a) => a.id);
-  box.innerHTML = `<div class="ovTask"><span class="pill ${r.status === 'running' ? 'running' : r.status === 'done' ? 'done' : r.status === 'failed' || r.status === 'interrupted' ? 'failed' : ''}">${esc(r.status)}</span><b title="${esc(r.task)}">${esc(r.task)}</b></div>
-    <dl class="ovStats"><div><dt>elapsed</dt><dd>${fmtAgo(elapsed)}</dd></div><div><dt>running</dt><dd>${c('running')}</dd></div><div><dt>waiting</dt><dd>${c('queued')}</dd></div><div><dt>done</dt><dd>${c('done')}</dd></div><div><dt>failed</dt><dd>${c('failed')}</dd></div>${cl.length ? `<div><dt>claims</dt><dd><span class="okc">${v('confirmed')}</span> / <span class="unc">${v('unclear') + v('pending')}</span> / <span class="badc">${v('refuted')}</span></dd></div>` : ''}<div><dt>busy accounts</dt><dd>${busy.length ? esc(busy.join(', ')) : 'none'}</dd></div></dl>${spark(ag)}`;
-}
-setInterval(renderOverview, 1000);
+function renderOverview() { renderRunhead(); renderMeters(); }
+setInterval(() => { renderMeters(); if (cur()?.status === 'running') renderRunhead(); }, 1000);
 
 
 // ---------- clock + connection ----------
@@ -796,27 +819,47 @@ const fmtDur = (ms) => (ms < 1000 ? '0s' : ms < 60000 ? `${Math.round(ms / 1000)
 let listsQueued = false;
 function scheduleLists() { if (listsQueued) return; listsQueued = true; requestAnimationFrame(() => { listsQueued = false; renderAgents(); refreshDrawer(); renderWizard(); }); }
 
+const PHASES = [
+  ['Plan', (a) => a.id === 'lead' && a.role === 'lead'],
+  ['Research', (a) => a.role === 'worker' || a.role === 'sub'],
+  ['Verify', (a) => a.role === 'verify'],
+  ['Candidates', (a) => a.role === 'cand'],
+  ['Rank and report', (a) => a.role === 'judge' || (a.role === 'lead' && a.id !== 'lead')],
+];
 function renderAgents() {
   const box = $('#agents'); const r = cur();
   $('#agentN').textContent = r ? r.agents.size : 0;
   if (S.tab !== 'agents') return;
+  const keep = box.scrollTop;
   box.innerHTML = '';
   const header = el('div', 'agents-heading');
-  const label = el('div', 'agents-heading-copy', `<strong>Run agents</strong><span>Inspect progress and troubleshoot failures</span>`);
   const actions = el('div', 'agents-heading-actions');
-  const forgeButton = el('button', 'dact addAgent', 'Kernel'); forgeButton.type = 'button'; forgeButton.title = 'Start ForgeKernel campaigns'; forgeButton.onclick = openForgeModal;
-  const add = el('button', 'dact addAgent', '+ Add agent'); add.type = 'button'; add.onclick = openAgentModal; actions.append(forgeButton, add); header.append(label, actions); box.append(header);
-  if (!r || !r.agents.size) { box.append(el('div', 'agents-empty', 'No agents in this run yet. Start research or add an agent to begin.')); return; }
-  const list = el('div', 'agent-list');
-  [...r.agents.values()].forEach((a) => {
-    const col = a.status === 'failed' ? COLORS.bad : COLORS[harnessOf(a)] ?? COLORS.none;
-    const status = a.status || 'queued';
-    const detail = a.status === 'failed' && a.error ? a.error : a.account ? `${a.account} · ${a.harness || 'assigned'}` : 'Waiting for an account';
-    const row = el('button', 'arow', `<span class="agent-marker" style="background:${col}"></span><span class="agent-main"><span class="agent-title">${esc(a.title ?? a.role ?? a.id)}</span><span class="agent-meta">${esc(a.id)} · ${esc(detail)}</span></span><span class="pill ${esc(status)}">${esc(status)}</span>`);
-    row.type = 'button'; row.setAttribute('aria-label', `${a.title ?? a.id}, ${status}. Open agent details`);
-    row.onclick = () => openAgent(a.id); list.append(row);
-  });
-  box.append(list);
+  const add = el('button', 'dact', 'Add agent'); add.type = 'button'; add.onclick = openAgentModal;
+  const forgeButton = el('button', 'dact', 'Kernel campaigns'); forgeButton.type = 'button'; forgeButton.title = 'Start ForgeKernel campaigns'; forgeButton.onclick = openForgeModal;
+  actions.append(add, forgeButton); header.append(actions); box.append(header);
+  if (!r || !r.agents.size) { box.append(el('div', 'agents-empty', 'No agents yet. Start a run from the Terminal tab, or add a single agent.')); return; }
+  const all = [...r.agents.values()];
+  const used = new Set();
+  for (const [name, test] of PHASES) {
+    const items = all.filter((a) => !used.has(a.id) && test(a));
+    if (!items.length) continue;
+    items.forEach((a) => used.add(a.id));
+    const done = items.filter((a) => a.status === 'done').length;
+    const group = el('section', 'phase');
+    group.append(el('h3', 'phase-head', `<span>${esc(name)}</span><span class="phase-count">${done}/${items.length}</span>`));
+    for (const a of items) {
+      const dur = a.startedAt ? fmtDur((a.endedAt ?? Date.now()) - a.startedAt) : '';
+      const side = a.score != null && Number.isFinite(a.score) ? Number(a.score).toFixed(3) : dur;
+      const row = el('button', `arow ${harnessOf(a)} st-${a.status ?? 'queued'}${drawer?.type === 'agent' && drawer.id === a.id ? ' sel' : ''}`,
+        `<span class="agent-main"><span class="agent-title">${esc(a.title ?? a.role ?? a.id)}</span><span class="agent-meta">${esc(a.id)}${a.account ? ` · ${esc(a.account)}` : ' · waiting'}${a.strikes ? ` · ${a.strikes} strike${a.strikes > 1 ? 's' : ''}` : ''}</span></span><span class="agent-side"><span class="st">${esc(STATUS_TEXT[a.status] ?? a.status ?? 'Waiting')}</span><span class="dur">${esc(side)}</span></span>`);
+      row.type = 'button'; row.setAttribute('aria-label', `${a.title ?? a.id}, ${a.status}. Open in inspector`);
+      row.onclick = () => openAgent(a.id); group.append(row);
+    }
+    box.append(group);
+  }
+  const rest = all.filter((a) => !used.has(a.id));
+  if (rest.length) { const g = el('section', 'phase'); g.append(el('h3', 'phase-head', `<span>Other</span><span class="phase-count">${rest.length}</span>`)); rest.forEach((a) => { const row = el('button', `arow ${harnessOf(a)} st-${a.status}`, `<span class="agent-main"><span class="agent-title">${esc(a.title ?? a.id)}</span><span class="agent-meta">${esc(a.id)}</span></span><span class="agent-side"><span class="st">${esc(STATUS_TEXT[a.status] ?? a.status)}</span></span>`); row.type = 'button'; row.onclick = () => openAgent(a.id); g.append(row); }); box.append(g); }
+  box.scrollTop = keep;
 }
 document.querySelectorAll('#side nav button').forEach((b) => b.addEventListener('click', renderAgents));
 
@@ -899,24 +942,40 @@ function refreshDrawer() {
   } else {
     const r = cur(); const a = r?.agents.get(drawer.id);
     if (!a) return;
-    $('#dtitle').textContent = `${a.id} · ${a.title ?? a.role}`;
+    const openDetails = new Set([...body.querySelectorAll('details[open]')].map((d) => d.dataset.key));
+    const roleName = a.id === 'lead' ? 'Lead' : ({ worker: 'Research', sub: 'Sub-research', verify: 'Verification', judge: 'Judge', cand: 'Candidate', lead: 'Lead' })[a.role] ?? 'Agent';
+    $('#dtitle').textContent = a.title ?? a.id;
+    const dur = a.startedAt ? fmtDur((a.endedAt ?? Date.now()) - a.startedAt) : 'not started';
+    $('#dsub').textContent = `${roleName} · ${a.id} · ${STATUS_TEXT[a.status] ?? a.status} · ${dur}`;
     const logs = r.feed.filter((f) => f.id === a.id);
     const claims = [...r.claims.values()].filter((c) => c.agent === a.id);
-    const dur = a.startedAt ? fmtDur((a.endedAt ?? Date.now()) - a.startedAt) : '-';
-    body.innerHTML = kv([
-      ['role', esc(a.role)], ['status', `<span class="pill ${a.status}">${esc(a.status)}</span>`],
-      ['parent', a.parent ? `<a href="#" data-ag="${esc(a.parent)}">${esc(a.parent)}</a>` : '-'],
-      ['harness', esc(a.harness ?? 'not assigned')], ['account', a.account ? `<a href="#" data-acc="${esc(a.account)}">${esc(a.account)}</a>` : 'waiting for a free account'],
-      ['accounts tried', esc((a.attempts ?? []).join(' > ') || '-')], ['failovers', a.failovers ?? 0], ['duration', dur],
-      ...(a.score != null ? [['score', Number.isFinite(a.score) ? Number(a.score).toFixed(4) : 'failed'], ['family', esc(a.family ?? '')], ['idea', esc(a.idea ?? '')], ['champion', a.champion ? 'yes' : 'no']] : []),
-      ...(a.error ? [['error', esc(a.error)]] : []),
-    ])
-      + (claims.length ? `<div class="dsec">Claims (${claims.length})</div>${claims.map((c) => `<div class="claim ${c.verdict}"><div class="h"><span>${esc(c.id)}</span><span class="badge">${c.verdict.toUpperCase()}</span></div><div class="t">${esc(c.text)}</div>${c.note ? `<div class="note">${esc(c.note)}</div>` : ''}</div>`).join('')}` : '')
-      + `<div class="dsec">Activity (${logs.length})</div><div class="dpre">${logs.map((f) => `${f.kind === 'tool' ? '> ' : f.kind === 'err' ? '! ' : ''}${esc(f.text)}`).join('\n') || 'no output yet'}</div>`
-      + (a.output ? `<div class="dsec">Result</div><div class="dpre">${esc(a.output)}</div>` : '')
-      + (a.prompt ? `<div class="dsec">Prompt</div><div class="dpre">${esc(a.prompt)}</div>` : '');
+    const acct = a.account ? S.accounts.get(a.account) : null;
+    const signed = acct ? (acct.checking ? 'Checking' : acct.authed === true ? 'Signed in' : acct.authed === false ? 'Signed out' : 'Not checked') : '';
+    const accountCard = acct ? `<section class="card acct-card ${esc(acct.harness)}">
+        <div class="card-head"><span class="swatch" aria-hidden="true"></span><b>${esc(acct.id)}</b><span class="state">${esc(signed)}</span></div>
+        ${kv([['Provider', esc(PROVIDERS[acct.harness]?.name ?? acct.harness)], ['Email', esc(acct.email ?? 'Not shared by the provider')], ['Model', esc(acct.model || 'Provider default')], ...(acct.plan ? [['Plan', esc(acct.plan)]] : []), ['Slots in use', `${acct.load} of ${S.settings.slots}`], ['Jobs', `${acct.done} done, ${acct.failed} failed`], ...(acct.limitedUntil > Date.now() ? [['Limit resets', esc(new Date(acct.limitedUntil).toLocaleTimeString())]] : []), ...(acct.usage?.tokens ? [['Tokens used', esc(String(acct.usage.tokens))]] : [])])}
+        <div class="dacts"><button type="button" class="dact" data-acc="${esc(acct.id)}">Account details</button><button type="button" class="dact" data-probe="${esc(acct.id)}">Check sign-in</button></div>
+      </section>` : `<section class="card"><div class="muted2">${a.id === 'lead' && !a.account ? 'Coordinated by Ratchet.' : 'Waiting for a free account. It starts as soon as one has a slot.'}</div></section>`;
+    const tl = (a.timeline ?? []).map((e) => `<li class="tl-${e.kind}"><time>${new Date(e.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</time><span>${e.kind === 'start' ? `Started on ${esc(e.account)}` : e.kind === 'limit' ? `${esc(e.account)} hit its usage limit, switching account` : e.kind === 'done' ? 'Finished' : `Failed${e.error ? `: ${esc(e.error)}` : ''}`}</span></li>`).join('');
+    const facts = kv([
+      ['Parent', a.parent ? `<a href="#" data-ag="${esc(a.parent)}">${esc(a.parent)}</a>` : 'none'],
+      ...(a.tokens ? [['Tokens', esc(String(a.tokens))]] : []), ...(a.cost ? [['Cost', `$${a.cost.toFixed(3)}`]] : []),
+      ...(a.score != null ? [['Score', Number.isFinite(a.score) ? Number(a.score).toFixed(4) : 'failed'], ['Idea', esc(a.idea ?? '')], ['Family', esc(a.family ?? '')], ['Champion', a.champion ? 'yes' : 'no']] : []),
+      ...(a.strikes ? [['Integrity', `${a.strikes} strike${a.strikes > 1 ? 's' : ''}: ${esc((a.strikeReasons ?? []).join('; '))}`]] : []),
+      ...(a.error ? [['Error', esc(a.error)]] : []),
+    ]);
+    const det = (key, title, inner, openByDefault) => `<details data-key="${key}" ${openDetails.has(key) || (openByDefault && !body.dataset.seen?.includes(key)) ? 'open' : ''}><summary>${title}</summary>${inner}</details>`;
+    body.innerHTML = `<h4 class="dsec">Account</h4>${accountCard}
+      ${tl ? `<h4 class="dsec">Attempts</h4><ol class="timeline">${tl}</ol>` : ''}
+      <h4 class="dsec">Details</h4>${facts}
+      ${claims.length ? `<h4 class="dsec">Claims (${claims.length})</h4>${claims.map((c) => `<div class="claim ${c.verdict}"><div class="h"><span>${esc(c.id)}${c.elo ? ` · rank ${c.elo}` : ''}</span><span class="badge">${esc(c.verdict)}</span></div><div class="t">${esc(c.text)}</div>${c.note ? `<div class="note">${esc(c.note)}</div>` : ''}</div>`).join('')}` : ''}
+      ${det('activity', `Activity (${logs.length})`, `<div class="dpre">${logs.map((f) => `${f.kind === 'tool' ? '› ' : f.kind === 'err' ? '! ' : ''}${esc(f.text)}`).join('\n') || 'No output yet.'}</div>`, true)}
+      ${a.output ? det('result', 'Result', `<div class="dpre">${esc(a.output)}</div>`, true) : ''}
+      ${a.prompt ? det('prompt', 'Prompt', `<div class="dpre">${esc(a.prompt)}</div>`, false) : ''}`;
+    body.dataset.seen = 'activity,result';
     body.querySelectorAll('[data-ag]').forEach((x) => { x.onclick = (e) => { e.preventDefault(); openAgent(x.dataset.ag); }; });
     body.querySelectorAll('[data-acc]').forEach((x) => { x.onclick = (e) => { e.preventDefault(); openAccount(x.dataset.acc); }; });
+    body.querySelectorAll('[data-probe]').forEach((x) => { x.onclick = () => sendCmd(`account probe ${x.dataset.probe}`); });
   }
   body.scrollTop = keep;
   const box = body.querySelector('#loginCode'); if (box && typed) { box.value = typed; if (hadFocus) box.focus(); }
