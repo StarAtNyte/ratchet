@@ -73,6 +73,7 @@ export function runCli({ harness, account, env, cwd, prompt, mode, onLog, signal
     let lastText = '';
     let errText = '';
     let isError = false;
+    let usage = null;
 
     p.on('error', (e) => resolve({ ok: false, text: '', error: `spawn ${cmd}: ${e.message}`, limited: false }));
     p.stdin.on('error', () => {});
@@ -92,6 +93,7 @@ export function runCli({ harness, account, env, cwd, prompt, mode, onLog, signal
         } else if (ev.type === 'result') {
           final = ev.result ?? lastText;
           isError = !!ev.is_error;
+          if (ev.usage || ev.total_cost_usd != null) usage = { ...(ev.usage ?? {}), cost_usd: ev.total_cost_usd ?? 0 };
           if (isError) errText += `${ev.result ?? ''}\n`;
         }
       }
@@ -102,10 +104,10 @@ export function runCli({ harness, account, env, cwd, prompt, mode, onLog, signal
 
     p.on('close', (code) => {
       const failed = code !== 0 || isError || (!final && !lastText);
-      if (!failed) return resolve({ ok: true, text: final || lastText });
+      if (!failed) return resolve({ ok: true, text: final || lastText, usage });
       const combined = `${errText}\n${final}`;
       const limited = LIMIT_RE.test(combined);
-      resolve({ ok: false, text: final || lastText, limited, resetAt: limited ? parseReset(combined) : 0, error: short(combined.trim() || `exit ${code}`, 500) });
+      resolve({ ok: false, usage, text: final || lastText, limited, resetAt: limited ? parseReset(combined) : 0, error: short(combined.trim() || `exit ${code}`, 500) });
     });
   });
 }
@@ -162,7 +164,7 @@ function runText(name, { env, cwd, prompt, mode, onLog, signal }) {
 
 /** Codex via the official SDK (same engine Evidra uses). One thread per call. */
 async function runCodexSdk({ env, cwd, prompt, mode, onLog, signal, model }) {
-  let final = ''; let errText = ''; let failed = false;
+  let final = ''; let errText = ''; let failed = false; let usage = null;
   try {
     const { Codex } = await import('@openai/codex-sdk');
     const codex = new Codex({ env: Object.fromEntries(Object.entries(mergeEnv(env)).filter(([, v]) => v != null)) });
@@ -178,11 +180,13 @@ async function runCodexSdk({ env, cwd, prompt, mode, onLog, signal, model }) {
         else if (it.type === 'command_execution') onLog({ kind: 'tool', text: `shell ${short(it.command ?? '', 140)}` });
         else if (it.type === 'web_search') onLog({ kind: 'tool', text: `web ${short(it.query ?? '', 140)}` });
         else if (it.type === 'file_change') onLog({ kind: 'tool', text: 'edit files' });
+      } else if (ev.type === 'turn.completed' && ev.usage) {
+        usage = { input_tokens: ev.usage.input_tokens ?? 0, output_tokens: ev.usage.output_tokens ?? 0, cache_read_input_tokens: ev.usage.cached_input_tokens ?? 0 };
       } else if (ev.type === 'turn.failed') { failed = true; errText += `${ev.error?.message ?? 'turn failed'}\n`; }
       else if (ev.type === 'error') { failed = true; errText += `${ev.message ?? 'error'}\n`; }
     }
   } catch (e) { failed = true; errText += `${e.message}\n`; }
-  if (!failed && final) return { ok: true, text: final };
+  if (!failed && final) return { ok: true, text: final, usage };
   const limited = LIMIT_RE.test(errText);
-  return { ok: false, text: final, limited, resetAt: limited ? parseReset(errText) : 0, error: short(errText.trim() || 'no output', 500) };
+  return { ok: false, usage, text: final, limited, resetAt: limited ? parseReset(errText) : 0, error: short(errText.trim() || 'no output', 500) };
 }
