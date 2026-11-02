@@ -4,6 +4,12 @@
 
 First production release.
 
+### Modes and innovation
+- Run modes with their own playbooks: research, math, kernel optimization, score improvement and build, from the terminal (`run -m <mode>`, shortcuts) and from a New run dialog.
+- Every non-trivial plan includes literature, invention and falsification lines; researchers think first, read papers and build prototypes; claims are typed finding, hypothesis or invention.
+- Optimiser explorers research and implement new method families; candidates state hypothesis, mechanism and source.
+- autoresearch-style `program.md` research program, `results.tsv` experiment log fed to every candidate, and a git branch with every champion.
+
 ### Research swarm
 - Effort scaling: the lead classifies each question (simple, comparison, complex) and sizes the swarm to it; every line of attack carries a difficulty that sets its tool-call budget and whether it may open sub-investigations.
 - Structured delegation briefs with objective, non-goals, sibling lines, deliverable and stop condition, so researchers do not duplicate each other.

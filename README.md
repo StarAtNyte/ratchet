@@ -120,6 +120,24 @@ Custom harness:
 
 Open the **Agents** tab and click **+ Add agent**: pick `auto`, `claude`, `codex` or another harness, optionally pin a specific account, name it, and describe the task. It runs on the workspace, joins the current run (or opens its own), shows on the graph, and its result and log are in its details. A pinned account is never swapped for another on failure.
 
+## Modes
+
+Every run has a mode. Start one from **New run** in the header (choose a mode card, describe the task, pick how many rounds) or from the Terminal:
+
+```
+run -m research <question>   # default: literature, invention and falsification lines, cross-model verification
+run -m math <statement>      # known results, conjectures, proof attempts (formal where possible), counterexample search
+run -m kernel <goal>         # profiling and roofline analysis, kernel literature, new kernels, correctness-gated benchmarks
+run -m score <goal>          # benchmarks and competitions; with ratchet.json present it starts the optimise loop
+run -m build <feature>       # design, implement, test and review a feature
+math <statement>             # shortcuts: research, math, score, build
+modes                        # what each mode does
+```
+
+A mode changes what the planner must include, the standards researchers work to, how verifiers check claims and how the report is written; the six-step round below is the same for all of them. For ForgeKernel task folders use `kernel run <task>` or **Kernel campaigns**.
+
+**Steer every agent with `program.md`.** As in [autoresearch](https://github.com/karpathy/autoresearch), a `program.md` in the workspace is the research program: every agent in every mode reads it. `program init` writes a template with goal, constraints, ideas to try and things to avoid.
+
 ## Research swarm
 
 ```
@@ -175,7 +193,9 @@ How it works:
 - **Evaluation cascade.** Cheap checks come first in `eval`; expensive stages run only if earlier ones pass. Evaluations run one at a time so benchmarks get exclusive hardware.
 - **Novelty gate.** A candidate that is a near-copy of a recent program is rejected before it costs an evaluation, and the rejection is logged as a failed idea.
 - **Model choice.** Every `strongEvery`-th mutation goes to the strong model; the rest are assigned by a UCB1 bandit over the available harnesses, rewarded when a child beats its parent.
-- **Memory.** Failed ideas are logged to `failures.jsonl` and fed to later workers; parents currently being mutated are avoided to reduce duplicate work.
+- **Explorers.** Every third candidate, or whenever fewer than three method families exist, is an explorer: it must read papers and code for new algorithms and architectures and implement a fundamentally different method family, not a tweak. Every candidate states its hypothesis, mechanism and source.
+- **Experiment log and memory.** Like autoresearch's results log, every attempt goes to `results.tsv` (generation, parent, family, score, keep / discard / crash / not-novel, idea) and the recent log is in every candidate's prompt. Failed ideas are fed back with their reason; parents currently being mutated are avoided.
+- **Git ratchet.** In a git workspace every new champion is committed on branch `ratchet/<run>` with its idea and score, so the history is auditable and any step can be checked out.
 
 Output lives in `<workspace>/.ratchet/runs/<id>/opt/`: `archive.json`, `failures.jsonl`, `snap/<candidate>/`, and a `REPORT.md` with the improvement over baseline.
 
