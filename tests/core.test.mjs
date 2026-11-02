@@ -230,3 +230,10 @@ test('built-in kernel tasks resolve independently of the workspace', async () =>
   assert.match(forge.resolveTask('@builtin:muse_prefill_boundary', '/tmp'), /tasks\/muse_prefill_boundary$/);
   assert.throws(() => forge.resolveTask('@', '/tmp'), /task folder/);
 });
+
+test('evaluation cascade: earlier stages only need to exit 0', async () => {
+  const { runEval: re } = await import('../src/optimizer.mjs');
+  assert.equal((await re('echo ok', '.', 10, false)).ok, true);
+  assert.equal((await re('exit 1', '.', 10, false)).ok, false);
+  assert.equal((await re('echo ok', '.', 10, true)).ok, false, 'the final stage still needs a score');
+});

@@ -126,7 +126,8 @@ test('real optimise path: staging outside the workspace, evaluator run and git c
   const swarm = { settings: { dir, mock: false }, newRun: () => run, emit: (e) => events.push(e), end: (r, st) => { r.status = st; } };
   const opt = new Optimizer(swarm);
   // drive only the baseline and one manual champion through the real file paths
-  wf(join(dir, 'ratchet.json'), JSON.stringify({ objective: 'lower X', targets: ['kernel.py'], eval: ['python3 bench.py'], direction: 'min', parallel: 0, maxIterations: 1 }));
+  wf(join(dir, 'check.py'), 'print("ok")\n');
+  wf(join(dir, 'ratchet.json'), JSON.stringify({ objective: 'lower X', targets: ['kernel.py'], eval: ['python3 check.py', 'python3 bench.py'], direction: 'min', parallel: 0, maxIterations: 1 }));
   await opt.start();
   await new Promise((r) => setTimeout(r, 1500));
   assert.equal(run.status, 'done', 'baseline evaluated from a staging copy outside the workspace');

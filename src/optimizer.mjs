@@ -31,7 +31,7 @@ export function loadConfig(dir, mock) {
 }
 
 /** Run a shell command in cwd; last stdout line is {"score":n,"ok":bool} or a bare number. */
-export function runEval(cmd, cwd, timeoutSec) {
+export function runEval(cmd, cwd, timeoutSec, needScore = true) {
   return new Promise((resolve) => {
     const p = spawn('bash', ['-lc', cmd], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = ''; let err = '';
@@ -40,6 +40,8 @@ export function runEval(cmd, cwd, timeoutSec) {
     p.stderr.on('data', (d) => { err += d; });
     p.on('close', (code) => {
       clearTimeout(t);
+      // earlier cascade stages are gates: they only have to exit 0
+      if (!needScore) return resolve(code === 0 ? { ok: true, score: NaN } : { ok: false, score: NaN, error: (err || out).trim().slice(-300) || `exit ${code}` });
       const last = out.trim().split('\n').at(-1) ?? '';
       let r = null;
       try { r = JSON.parse(last); if (typeof r === 'number') r = { score: r, ok: true }; } catch { const n = Number(last); if (Number.isFinite(n) && last) r = { score: n, ok: true }; }
@@ -89,8 +91,9 @@ export class Optimizer {
     copyTree(this.swarm.settings.dir, stage); // pristine evaluator + data
     for (const t of cfg.targets) if (existsSync(join(snapDir, t))) cpSync(join(snapDir, t), join(stage, t), { recursive: true }); // only declared targets come from the candidate
     let res = { ok: true, score: NaN };
-    for (const cmd of [].concat(cfg.eval)) {
-      res = await this.evalExclusive(o, () => runEval(cmd, stage, cfg.timeoutSec));
+    const stages = [].concat(cfg.eval);
+    for (const [i, cmd] of stages.entries()) {
+      res = await this.evalExclusive(o, () => runEval(cmd, stage, cfg.timeoutSec, i === stages.length - 1));
       if (!res.ok) break;
     }
     if (res.ok && cfg.holdout && o.archive.champion && o.archive.better(res.score, o.archive.champion.score)) {
